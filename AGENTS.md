@@ -114,3 +114,10 @@ All standard dev commands are in `DEVELOPMENT.md`. Key ones:
 - The Vite dev server proxies `/api/*` to the runtime server at `:3484`. If the runtime isn't running, the web UI will load but show connection errors.
 - Lint warnings exist in the codebase (unused imports/params); these are non-blocking — `biome lint` exits 0 with warnings.
 - No PostHog telemetry key is needed for development; telemetry silently skips when `POSTHOG_KEY` is absent.
+
+### Running Kanban with agent CLIs (Claude Code / Codex)
+
+- To test Kanban end-to-end with real agents, build first (`npm run build`), then run `node dist/cli.js --port 3484` from a target git repo.
+- **Do NOT pass `ANTHROPIC_API_KEY` in the environment** when launching Kanban if the user has logged in to Claude Code interactively (`claude` login). The env var triggers an interactive API-key confirmation prompt inside the PTY that blocks the task.
+- Claude Code's first-time onboarding (theme picker, bypass-permissions acceptance) runs inside Kanban's embedded terminal. These prompts block the agent until answered. Pre-complete onboarding by running `claude -p "hello" --dangerously-skip-permissions` once from the CLI before using Kanban.
+- Codex CLI requires `codex login` (device auth or API key). The stored credential lives in `~/.codex/` and persists across sessions.
