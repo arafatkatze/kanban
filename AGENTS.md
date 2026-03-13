@@ -84,3 +84,33 @@ Use Blueprint primitives, don't reinvent
 - For button styles, use Blueprint's variant system (`variant="solid"`, `"outlined"`, `"minimal"`).
 - For external links styled as buttons, use `AnchorButton` instead of wrapping `<a>` around `<Button>`.
 - For empty/error/loading states, use `NonIdealState`. For inline alerts/banners, use `Callout`. For confirmation prompts, use `Alert`. For modals, use `Dialog` with `DialogBody`/`DialogFooter`. For selections from a list, use `Select`/`Omnibar` from `@blueprintjs/select`.
+
+## Cursor Cloud specific instructions
+
+### Services overview
+
+This is a two-package npm project (root runtime + `web-ui/` sub-package). No databases or Docker required.
+
+| Service | Port | Start command |
+|---------|------|--------------|
+| Runtime server (tRPC + PTY) | 3484 | `npm run dev` |
+| Web UI (Vite HMR) | 4173 | `npm run web:dev` |
+
+Both must run concurrently for full dev experience. Use `http://127.0.0.1:4173` for UI work (proxies API to :3484).
+
+### Commands reference
+
+All standard dev commands are in `DEVELOPMENT.md`. Key ones:
+- `npm run check` — lint + typecheck + test (same as pre-commit hook)
+- `npm run test` / `npm run web:test` — runtime / web-ui vitest suites
+- `npm run typecheck` / `npm run web:typecheck` — runtime / web-ui type checking
+- `npm run lint` — biome lint (both packages)
+- `npm run build` — full production build
+
+### Non-obvious caveats
+
+- `node-pty` is a native C++ addon. The system needs `python3`, `make`, and `g++` for `npm install` to succeed. These are pre-installed in the cloud VM.
+- The runtime server (`npm run dev`) creates a `.kanban/` directory in the workspace for file-based state. This is gitignored.
+- The Vite dev server proxies `/api/*` to the runtime server at `:3484`. If the runtime isn't running, the web UI will load but show connection errors.
+- Lint warnings exist in the codebase (unused imports/params); these are non-blocking — `biome lint` exits 0 with warnings.
+- No PostHog telemetry key is needed for development; telemetry silently skips when `POSTHOG_KEY` is absent.
