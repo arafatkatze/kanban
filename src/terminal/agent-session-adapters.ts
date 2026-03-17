@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import type { RuntimeAgentId, RuntimeHookEvent, RuntimeTaskSessionSummary } from "../core/api-contract.js";
+import type { RuntimeAgentId, RuntimeHookEvent, RuntimeTaskImage, RuntimeTaskSessionSummary } from "../core/api-contract.js";
 import { buildKanbanCommandParts } from "../core/kanban-command.js";
 import { quoteShellArg } from "../core/shell.js";
 import { getRuntimeHomePath } from "../state/workspace-state.js";
@@ -19,6 +19,7 @@ export interface AgentAdapterLaunchInput {
 	autonomousModeEnabled?: boolean;
 	cwd: string;
 	prompt: string;
+	images?: RuntimeTaskImage[];
 	startInPlanMode?: boolean;
 	resumeFromTrash?: boolean;
 	env?: Record<string, string | undefined>;
@@ -301,6 +302,41 @@ async function ensureTextFile(filePath: string, content: string, executable = fa
 	}
 }
 
+function mimeToExtension(mimeType: string): string {
+	const map: Record<string, string> = {
+		"image/png": ".png",
+		"image/jpeg": ".jpg",
+		"image/gif": ".gif",
+		"image/webp": ".webp",
+		"image/svg+xml": ".svg",
+		"image/bmp": ".bmp",
+	};
+	return map[mimeType] ?? ".png";
+}
+
+async function writeTaskImagesToDir(
+	images: RuntimeTaskImage[],
+	taskId: string,
+): Promise<{ paths: string[]; cleanup: () => Promise<void> }> {
+	const imagesDir = join(getRuntimeHomePath(), "task-images", taskId);
+	await mkdir(imagesDir, { recursive: true });
+	const paths: string[] = [];
+	for (const image of images) {
+		const ext = mimeToExtension(image.mimeType);
+		const fileName = `${image.id}${ext}`;
+		const filePath = join(imagesDir, fileName);
+		await writeFile(filePath, Buffer.from(image.data, "base64"));
+		paths.push(filePath);
+	}
+	return {
+		paths,
+		cleanup: async () => {
+			const { rm } = await import("node:fs/promises");
+			await rm(imagesDir, { recursive: true, force: true }).catch(() => {});
+		},
+	};
+}
+
 function withPrompt(args: string[], prompt: string, mode: "append" | "flag", flag?: string): PreparedAgentLaunch {
 	const trimmed = prompt.trim();
 	if (!trimmed) {
@@ -392,6 +428,15 @@ const claudeAdapter: AgentSessionAdapter = {
 			);
 		}
 
+		let imageCleanup: (() => Promise<void>) | undefined;
+		if (input.images?.length) {
+			const written = await writeTaskImagesToDir(input.images, input.taskId);
+			for (const imagePath of written.paths) {
+				args.push("--image", imagePath);
+			}
+			imageCleanup = written.cleanup;
+		}
+
 		const withPromptLaunch = withPrompt(args, input.prompt, "append");
 		return {
 			...withPromptLaunch,
@@ -399,6 +444,7 @@ const claudeAdapter: AgentSessionAdapter = {
 				...withPromptLaunch.env,
 				...env,
 			},
+			cleanup: imageCleanup,
 		};
 	},
 };
@@ -451,6 +497,15 @@ const codexAdapter: AgentSessionAdapter = {
 			);
 		}
 
+		let imageCleanup: (() => Promise<void>) | undefined;
+		if (input.images?.length) {
+			const written = await writeTaskImagesToDir(input.images, input.taskId);
+			for (const imagePath of written.paths) {
+				codexArgs.push("--image", imagePath);
+			}
+			imageCleanup = written.cleanup;
+		}
+
 		const trimmed = input.prompt.trim();
 		if (trimmed) {
 			const initialPrompt = input.startInPlanMode ? `/plan\n${trimmed}` : trimmed;
@@ -471,6 +526,7 @@ const codexAdapter: AgentSessionAdapter = {
 				binary,
 				args,
 				env,
+				cleanup: imageCleanup,
 				detectOutputTransition: codexPromptDetector,
 				shouldInspectOutputForTransition: shouldInspectCodexOutputForTransition,
 			};
@@ -480,6 +536,7 @@ const codexAdapter: AgentSessionAdapter = {
 			binary,
 			args: codexArgs,
 			env,
+			cleanup: imageCleanup,
 			detectOutputTransition: codexPromptDetector,
 			shouldInspectOutputForTransition: shouldInspectCodexOutputForTransition,
 		};

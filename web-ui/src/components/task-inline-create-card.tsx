@@ -1,10 +1,10 @@
 import { Button, Card, Checkbox, Code, FormGroup, HTMLSelect, Icon } from "@blueprintjs/core";
-import type { ReactElement } from "react";
+import type { Dispatch, ReactElement, SetStateAction } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 
 import { BranchSelectDropdown, type BranchSelectOption } from "@/components/branch-select-dropdown";
 import { TaskPromptComposer } from "@/components/task-prompt-composer";
-import type { TaskAutoReviewMode } from "@/types";
+import type { TaskAutoReviewMode, TaskImage } from "@/types";
 
 export type TaskInlineCardMode = "create" | "edit";
 
@@ -42,6 +42,8 @@ function ButtonShortcut({
 export function TaskInlineCreateCard({
 	prompt,
 	onPromptChange,
+	images,
+	onImagesChange,
 	onCreate,
 	onCreateAndStart,
 	onCancel,
@@ -62,6 +64,8 @@ export function TaskInlineCreateCard({
 }: {
 	prompt: string;
 	onPromptChange: (value: string) => void;
+	images?: TaskImage[];
+	onImagesChange?: Dispatch<SetStateAction<TaskImage[]>>;
 	onCreate: () => void;
 	onCreateAndStart?: () => void;
 	onCancel: () => void;
@@ -120,9 +124,11 @@ export function TaskInlineCreateCard({
 					id={promptId}
 					value={prompt}
 					onValueChange={onPromptChange}
+					images={images}
+					onImagesChange={onImagesChange}
 					onSubmit={onCreate}
 					onSubmitAndStart={onCreateAndStart}
-					placeholder="Describe the task"
+					placeholder="Describe the task..."
 					enabled={enabled}
 					autoFocus
 					workspaceId={workspaceId}
