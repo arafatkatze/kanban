@@ -236,6 +236,7 @@ export function CardDetailView({
 	onBottomTerminalToggleExpand,
 	isDocumentVisible = true,
 	onClineSettingsSaved,
+	isCodeReviewPanelVisible = true,
 }: {
 	selection: CardSelection;
 	currentProjectId: string | null;
@@ -295,6 +296,7 @@ export function CardDetailView({
 	onBottomTerminalToggleExpand?: () => void;
 	isDocumentVisible?: boolean;
 	onClineSettingsSaved?: () => void;
+	isCodeReviewPanelVisible?: boolean;
 }): React.ReactElement {
 	const [selectedPath, setSelectedPath] = useState<string | null>(null);
 	const [diffComments, setDiffComments] = useState<Map<string, DiffLineComment>>(new Map());
@@ -400,6 +402,8 @@ export function CardDetailView({
 	const emptyDiffTitle = diffMode === "last_turn" ? "No changes since last turn" : "No working changes";
 	const agentPanelPercent = `${(agentPanelRatio * 100).toFixed(1)}%`;
 	const diffPanelPercent = `${((1 - agentPanelRatio) * 100).toFixed(1)}%`;
+	const isReviewPaneActive = isCodeReviewPanelVisible || isDiffExpanded;
+	const reviewPanelWidth = isReviewPaneActive ? (isDiffExpanded ? "100%" : diffPanelPercent) : "0%";
 	const fileTreePanelFlex = `0 0 ${isDiffExpanded ? EXPANDED_FILE_TREE_PANEL_BASIS : COLLAPSED_FILE_TREE_PANEL_BASIS}`;
 	const showMoveToTrashActions = selection.column.id === "review" || selection.column.id === "in_progress";
 	const isTaskTerminalEnabled = selection.column.id === "in_progress" || selection.column.id === "review";
@@ -490,6 +494,12 @@ export function CardDetailView({
 		setDiffMode("working_copy");
 	}, [selection.card.id]);
 
+	useEffect(() => {
+		if (!isCodeReviewPanelVisible && isDiffExpanded) {
+			setIsDiffExpanded(false);
+		}
+	}, [isCodeReviewPanelVisible, isDiffExpanded]);
+
 	const handleToggleDiffExpand = useCallback(() => {
 		if (!isDiffExpanded && bottomTerminalOpen) {
 			onBottomTerminalClose();
@@ -571,7 +581,13 @@ export function CardDetailView({
 					<>
 						<div ref={mainRowRef} style={{ display: "flex", flex: "1 1 0", minHeight: 0, overflow: "hidden" }}>
 							<div
-								style={{ display: isDiffExpanded ? "none" : "flex", width: agentPanelPercent, minWidth: 0, minHeight: 0 }}
+								style={{
+									display: isDiffExpanded ? "none" : "flex",
+									width: isCodeReviewPanelVisible ? agentPanelPercent : "100%",
+									minWidth: 0,
+									minHeight: 0,
+									transition: "width 220ms ease",
+								}}
 							>
 									{showClineAgentChatPanel ? (
 										<ClineAgentChatPanel
@@ -639,7 +655,7 @@ export function CardDetailView({
 										/>
 									)}
 								</div>
-							{!isDiffExpanded ? (
+							{!isDiffExpanded && isCodeReviewPanelVisible ? (
 								<div
 									role="separator"
 									aria-orientation="vertical"
@@ -668,13 +684,17 @@ export function CardDetailView({
 							<div
 								style={{
 									display: "flex",
-									width: isDiffExpanded ? "100%" : diffPanelPercent,
+									width: reviewPanelWidth,
 									minWidth: 0,
 									minHeight: 0,
 									flexDirection: "column",
+									overflow: "hidden",
+									opacity: isReviewPaneActive ? 1 : 0,
+									transition: "width 220ms ease, opacity 180ms ease",
+									pointerEvents: isReviewPaneActive ? "auto" : "none",
 								}}
 							>
-								{isRuntimeAvailable ? (
+								{isRuntimeAvailable && isReviewPaneActive ? (
 								<DiffToolbar
 									mode={diffMode}
 									onModeChange={setDiffMode}
@@ -683,7 +703,7 @@ export function CardDetailView({
 								/>
 							) : null}
 								<div style={{ display: "flex", flex: "1 1 0", minHeight: 0 }}>
-									{isWorkspaceChangesPending ? (
+									{!isReviewPaneActive ? null : isWorkspaceChangesPending ? (
 										<WorkspaceChangesLoadingPanel panelFlex={fileTreePanelFlex} />
 									) : hasNoWorkspaceFileChanges ? (
 										<WorkspaceChangesEmptyPanel title={emptyDiffTitle} />
