@@ -234,6 +234,7 @@ export function CardDetailView({
 	onBottomTerminalSendAgentCommand,
 	isBottomTerminalExpanded,
 	onBottomTerminalToggleExpand,
+	isDiffPanelVisible = true,
 	isDocumentVisible = true,
 	onClineSettingsSaved,
 }: {
@@ -293,6 +294,7 @@ export function CardDetailView({
 	onBottomTerminalSendAgentCommand?: () => void;
 	isBottomTerminalExpanded?: boolean;
 	onBottomTerminalToggleExpand?: () => void;
+	isDiffPanelVisible?: boolean;
 	isDocumentVisible?: boolean;
 	onClineSettingsSaved?: () => void;
 }): React.ReactElement {
@@ -569,10 +571,16 @@ export function CardDetailView({
 					<div style={{ display: "flex", flex: "1 1 0", minHeight: 0, overflow: "hidden" }}>{gitHistoryPanel}</div>
 				) : (
 					<>
-						<div ref={mainRowRef} style={{ display: "flex", flex: "1 1 0", minHeight: 0, overflow: "hidden" }}>
-							<div
-								style={{ display: isDiffExpanded ? "none" : "flex", width: agentPanelPercent, minWidth: 0, minHeight: 0 }}
-							>
+					<div ref={mainRowRef} style={{ display: "flex", flex: "1 1 0", minHeight: 0, overflow: "hidden" }}>
+						<div
+							style={{
+								display: isDiffExpanded ? "none" : "flex",
+								width: isDiffPanelVisible ? agentPanelPercent : "100%",
+								minWidth: 0,
+								minHeight: 0,
+								transition: "width 250ms ease-in-out",
+							}}
+						>
 									{showClineAgentChatPanel ? (
 										<ClineAgentChatPanel
 											ref={clineAgentChatPanelRef}
@@ -639,41 +647,43 @@ export function CardDetailView({
 										/>
 									)}
 								</div>
-							{!isDiffExpanded ? (
-								<div
-									role="separator"
-									aria-orientation="vertical"
-									aria-label="Resize agent and diff panels"
-									style={{
-										position: "relative",
-										flex: "0 0 1px",
-										background: "var(--color-divider)",
-										zIndex: 2,
-									}}
-								>
-									<div
-										onMouseDown={handleSeparatorMouseDown}
-										className="hover:bg-accent/30"
-										style={{
-											position: "absolute",
-											left: -2,
-											right: -2,
-											top: 0,
-											bottom: 0,
-											cursor: "ew-resize",
-										}}
-									/>
-								</div>
-							) : null}
+						{!isDiffExpanded && isDiffPanelVisible ? (
 							<div
+								role="separator"
+								aria-orientation="vertical"
+								aria-label="Resize agent and diff panels"
 								style={{
-									display: "flex",
-									width: isDiffExpanded ? "100%" : diffPanelPercent,
-									minWidth: 0,
-									minHeight: 0,
-									flexDirection: "column",
+									position: "relative",
+									flex: "0 0 1px",
+									background: "var(--color-divider)",
+									zIndex: 2,
 								}}
 							>
+								<div
+									onMouseDown={handleSeparatorMouseDown}
+									className="hover:bg-accent/30"
+									style={{
+										position: "absolute",
+										left: -2,
+										right: -2,
+										top: 0,
+										bottom: 0,
+										cursor: "ew-resize",
+									}}
+								/>
+							</div>
+						) : null}
+						<div
+							style={{
+								display: "flex",
+								width: isDiffExpanded ? "100%" : isDiffPanelVisible ? diffPanelPercent : "0%",
+								minWidth: 0,
+								minHeight: 0,
+								flexDirection: "column",
+								overflow: "hidden",
+								transition: isDiffExpanded ? undefined : "width 250ms ease-in-out",
+							}}
+						>
 								{isRuntimeAvailable ? (
 								<DiffToolbar
 									mode={diffMode}
