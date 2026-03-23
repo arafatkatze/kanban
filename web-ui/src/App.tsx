@@ -81,6 +81,7 @@ export default function App(): ReactElement {
 	const [homeSidebarSection, setHomeSidebarSection] = useState<"projects" | "agent">("projects");
 	const [isClearTrashDialogOpen, setIsClearTrashDialogOpen] = useState(false);
 	const [isGitHistoryOpen, setIsGitHistoryOpen] = useState(false);
+	const [isCodeReviewPanelVisible, setIsCodeReviewPanelVisible] = useState(true);
 	const [pendingTaskStartAfterEditId, setPendingTaskStartAfterEditId] = useState<string | null>(null);
 	const taskEditorResetRef = useRef<() => void>(() => {});
 	const lastStreamErrorRef = useRef<string | null>(null);
@@ -183,6 +184,9 @@ export default function App(): ReactElement {
 		}
 		return findCardSelection(board, selectedTaskId);
 	}, [board, selectedTaskId]);
+	const handleToggleCodeReviewPanel = useCallback(() => {
+		setIsCodeReviewPanelVisible((previous) => !previous);
+	}, []);
 	const {
 		workspacePath,
 		workspaceGit,
@@ -786,6 +790,8 @@ export default function App(): ReactElement {
 					}
 					isTerminalOpen={selectedCard ? isDetailTerminalOpen : showHomeBottomTerminal}
 					isTerminalLoading={selectedCard ? isDetailTerminalStarting : isHomeTerminalStarting}
+					onToggleCodeReviewPanel={selectedCard ? handleToggleCodeReviewPanel : undefined}
+					isCodeReviewPanelVisible={selectedCard ? isCodeReviewPanelVisible : undefined}
 					onOpenSettings={handleOpenSettings}
 					shortcuts={shortcuts}
 					selectedShortcutLabel={selectedShortcutLabel}
@@ -985,6 +991,7 @@ export default function App(): ReactElement {
 								onBottomTerminalToggleExpand={handleToggleExpandDetailTerminal}
 								isDocumentVisible={isDocumentVisible}
 								onClineSettingsSaved={refreshRuntimeProjectConfig}
+								isCodeReviewPanelVisible={isCodeReviewPanelVisible}
 							/>
 						</div>
 					) : null}

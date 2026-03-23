@@ -342,6 +342,33 @@ describe("CardDetailView", () => {
 		});
 	});
 
+	it("hides code review panes when code review visibility is disabled", async () => {
+		await act(async () => {
+			root.render(
+				<CardDetailView
+					selection={createSelection()}
+					currentProjectId="workspace-1"
+					selectedAgentId="claude"
+					sessionSummary={null}
+					taskSessions={{}}
+					onSessionSummary={() => {}}
+					onCardSelect={() => {}}
+					onTaskDragEnd={() => {}}
+					onMoveToTrash={() => {}}
+					isCodeReviewPanelVisible={false}
+					bottomTerminalOpen={false}
+					bottomTerminalTaskId={null}
+					bottomTerminalSummary={null}
+					onBottomTerminalClose={() => {}}
+				/>,
+			);
+		});
+
+		expect(container.querySelector('[aria-label="Resize agent and diff panels"]')).toBeNull();
+		expect(container.querySelector('[data-testid="diff-viewer-panel"]')).toBeNull();
+		expect(container.querySelector('[data-testid="file-tree-panel"]')).toBeNull();
+	});
+
 	it("queues Add diff comments into the cline composer without sending them", async () => {
 		const onAddReviewComments = vi.fn();
 

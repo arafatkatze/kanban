@@ -8,6 +8,8 @@ import {
 	CircleArrowDown,
 	Command,
 	GitBranch,
+	PanelRightClose,
+	PanelRightOpen,
 	Plus,
 	Settings,
 	Terminal,
@@ -223,6 +225,8 @@ export function TopBar({
 	onToggleTerminal,
 	isTerminalOpen,
 	isTerminalLoading,
+	onToggleCodeReviewPanel,
+	isCodeReviewPanelVisible,
 	onToggleGitHistory,
 	isGitHistoryOpen,
 	onOpenSettings,
@@ -254,6 +258,8 @@ export function TopBar({
 	onToggleTerminal?: () => void;
 	isTerminalOpen?: boolean;
 	isTerminalLoading?: boolean;
+	onToggleCodeReviewPanel?: () => void;
+	isCodeReviewPanelVisible?: boolean;
 	onToggleGitHistory?: () => void;
 	isGitHistoryOpen?: boolean;
 	onOpenSettings?: (section?: SettingsSection) => void;
@@ -440,6 +446,21 @@ export function TopBar({
 							</RadixPopover.Portal>
 						</RadixPopover.Root>
 					</div>
+				) : null}
+				{onToggleCodeReviewPanel && selectedTaskId ? (
+					<Tooltip
+						side="bottom"
+						content={isCodeReviewPanelVisible ? "Hide code review panel" : "Show code review panel"}
+					>
+						<Button
+							variant="ghost"
+							size="sm"
+							icon={isCodeReviewPanelVisible ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+							onClick={onToggleCodeReviewPanel}
+							aria-label={isCodeReviewPanelVisible ? "Hide code review panel" : "Show code review panel"}
+							className="ml-2"
+						/>
+					</Tooltip>
 				) : null}
 				{onToggleTerminal ? (
 					<Tooltip
