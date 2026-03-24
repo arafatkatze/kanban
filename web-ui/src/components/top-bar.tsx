@@ -209,40 +209,25 @@ function TopBarGitStatusSection({
 }
 
 function DiffPanelToggleButton({
-	selectedTaskId,
 	isDiffPanelVisible,
 	onToggle,
 }: {
-	selectedTaskId: string | null;
 	isDiffPanelVisible: boolean;
 	onToggle: () => void;
 }): React.ReactElement {
-	const taskWorkspaceSnapshot = useTaskWorkspaceSnapshotValue(selectedTaskId);
-	const additions = taskWorkspaceSnapshot?.additions ?? 0;
-	const deletions = taskWorkspaceSnapshot?.deletions ?? 0;
-	const hasChanges = additions > 0 || deletions > 0;
-
 	return (
-		<Tooltip side="bottom" content="Toggle diff panel">
+		<Tooltip side="bottom" content={isDiffPanelVisible ? "Hide diff panel" : "Show diff panel"}>
 			<Button
-				variant={isDiffPanelVisible ? "default" : "ghost"}
+				variant="ghost"
 				size="sm"
-				icon={<GitCompareArrows size={14} />}
+				icon={<GitCompareArrows size={16} />}
 				onClick={onToggle}
 				aria-label={isDiffPanelVisible ? "Hide diff panel" : "Show diff panel"}
 				className={cn(
 					"ml-2",
-					isDiffPanelVisible && "ring-1 ring-accent",
-					!isDiffPanelVisible && "kb-navbar-btn",
+					isDiffPanelVisible && "text-accent",
 				)}
-			>
-				{hasChanges ? (
-					<span className="font-mono text-xs whitespace-nowrap">
-						<span className="text-status-green">+{additions}</span>
-						<span className="text-status-red ml-1">-{deletions}</span>
-					</span>
-				) : null}
-			</Button>
+			/>
 		</Tooltip>
 	);
 }
@@ -487,7 +472,6 @@ export function TopBar({
 				) : null}
 			{onToggleDiffPanel ? (
 				<DiffPanelToggleButton
-					selectedTaskId={selectedTaskId ?? null}
 					isDiffPanelVisible={isDiffPanelVisible ?? true}
 					onToggle={onToggleDiffPanel}
 				/>
