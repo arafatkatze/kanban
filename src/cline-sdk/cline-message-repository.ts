@@ -77,10 +77,10 @@ export class InMemoryClineMessageRepository implements ClineMessageRepository {
 	listMessages(taskId: string): ClineTaskMessage[] {
 		const entry = this.entries.get(taskId);
 		if (entry) {
-			return entry.messages.map((message) => cloneMessage(message));
+			return [...entry.messages];
 		}
 		const hydratedMessages = this.hydratedMessagesByTaskId.get(taskId);
-		return hydratedMessages ? hydratedMessages.map((message) => cloneMessage(message)) : [];
+		return hydratedMessages ? [...hydratedMessages] : [];
 	}
 
 	async hydrateTaskMessages(
@@ -89,11 +89,11 @@ export class InMemoryClineMessageRepository implements ClineMessageRepository {
 	): Promise<ClineTaskMessage[]> {
 		const liveEntry = this.entries.get(taskId);
 		if (liveEntry) {
-			return liveEntry.messages.map((message) => cloneMessage(message));
+			return [...liveEntry.messages];
 		}
 		const cachedMessages = this.hydratedMessagesByTaskId.get(taskId);
 		if (cachedMessages) {
-			return cachedMessages.map((message) => cloneMessage(message));
+			return [...cachedMessages];
 		}
 		const persistedSession = await loadPersistedSession();
 		if (!persistedSession) {
@@ -101,7 +101,7 @@ export class InMemoryClineMessageRepository implements ClineMessageRepository {
 		}
 		const hydratedMessages = hydratePersistedSessionMessages(taskId, persistedSession.messages);
 		this.hydratedMessagesByTaskId.set(taskId, hydratedMessages);
-		return hydratedMessages.map((message) => cloneMessage(message));
+		return [...hydratedMessages];
 	}
 
 	emitSummary(summary: RuntimeTaskSessionSummary): void {
