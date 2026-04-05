@@ -71,6 +71,7 @@ export function useWorkspaceSync({
 		revision: null,
 	});
 	const workspaceRefreshRequestIdRef = useRef(0);
+	const wasDocumentVisibleRef = useRef(isDocumentVisible);
 
 	const isWorkspaceMetadataPending = currentProjectId !== null && appliedWorkspaceProjectId !== currentProjectId;
 
@@ -187,6 +188,12 @@ export function useWorkspaceSync({
 
 	useEffect(() => {
 		if (!hasReceivedSnapshot || !isDocumentVisible) {
+			wasDocumentVisibleRef.current = isDocumentVisible;
+			return;
+		}
+		const wasHidden = !wasDocumentVisibleRef.current;
+		wasDocumentVisibleRef.current = isDocumentVisible;
+		if (!wasHidden) {
 			return;
 		}
 		void refreshWorkspaceState();

@@ -320,36 +320,53 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 		const providerId = request.providerId?.trim().toLowerCase() || SDK_DEFAULT_PROVIDER_ID;
 		const modelId = request.modelId?.trim() || SDK_DEFAULT_MODEL_ID;
 		const resolvedMode: RuntimeTaskSessionMode = request.mode ?? "act";
-		const persistedResumeSnapshot = request.resumeFromTrash
-			? await this.sessionRuntime.readPersistedTaskSession(request.taskId).catch(() => null)
-			: null;
 
-		const entry =
-			request.resumeFromTrash && persistedResumeSnapshot
-				? createTaskEntryFromPersistedSession(request.taskId, persistedResumeSnapshot.messages, {
-						state: "awaiting_review",
-						mode: resolvedMode,
-						workspacePath: request.cwd,
-						startedAt: now(),
-						lastOutputAt: now(),
-						reviewReason: "attention",
-					})
-				: ({
-						summary: {
-							...createDefaultSummary(request.taskId),
-							state: request.resumeFromTrash ? "awaiting_review" : "running",
-							mode: resolvedMode,
-							workspacePath: request.cwd,
-							startedAt: now(),
-							lastOutputAt: now(),
-							reviewReason: request.resumeFromTrash ? "attention" : null,
-						},
-						messages: [],
-						activeAssistantMessageId: null,
-						activeReasoningMessageId: null,
-						toolMessageIdByToolCallId: new Map<string, string>(),
-						toolInputByToolCallId: new Map<string, unknown>(),
-					} satisfies ClineTaskSessionEntry);
+		const existingHasHydratedMessages = existing && existing.messages.length > 0 && request.resumeFromTrash;
+		const persistedResumeSnapshot =
+			request.resumeFromTrash && !existingHasHydratedMessages
+				? await this.sessionRuntime.readPersistedTaskSession(request.taskId).catch(() => null)
+				: null;
+
+		let entry: ClineTaskSessionEntry;
+		if (existingHasHydratedMessages) {
+			existing.summary = {
+				...existing.summary,
+				state: "awaiting_review",
+				mode: resolvedMode,
+				workspacePath: request.cwd,
+				startedAt: existing.summary.startedAt ?? now(),
+				lastOutputAt: now(),
+				updatedAt: now(),
+				reviewReason: "attention",
+			};
+			entry = existing;
+		} else if (request.resumeFromTrash && persistedResumeSnapshot) {
+			entry = createTaskEntryFromPersistedSession(request.taskId, persistedResumeSnapshot.messages, {
+				state: "awaiting_review",
+				mode: resolvedMode,
+				workspacePath: request.cwd,
+				startedAt: now(),
+				lastOutputAt: now(),
+				reviewReason: "attention",
+			});
+		} else {
+			entry = {
+				summary: {
+					...createDefaultSummary(request.taskId),
+					state: request.resumeFromTrash ? "awaiting_review" : "running",
+					mode: resolvedMode,
+					workspacePath: request.cwd,
+					startedAt: now(),
+					lastOutputAt: now(),
+					reviewReason: request.resumeFromTrash ? "attention" : null,
+				},
+				messages: [],
+				activeAssistantMessageId: null,
+				activeReasoningMessageId: null,
+				toolMessageIdByToolCallId: new Map<string, string>(),
+				toolInputByToolCallId: new Map<string, unknown>(),
+			} satisfies ClineTaskSessionEntry;
+		}
 		this.messageRepository.setTaskEntry(request.taskId, entry);
 		this.pendingTurnCancelTaskIds.delete(request.taskId);
 
@@ -396,11 +413,20 @@ export class InMemoryClineTaskSessionService implements ClineTaskSessionService 
 					systemPrompt = `${systemPrompt}\n\n${appendedSystemPrompt}`;
 				}
 
+				let sdkInitialMessages: ClineSdkPersistedMessage[] | undefined;
+				if (request.resumeFromTrash) {
+					sdkInitialMessages =
+						persistedResumeSnapshot?.messages ??
+						(await this.sessionRuntime.readPersistedTaskSession(request.taskId).catch(() => null))?.messages;
+				} else {
+					sdkInitialMessages = request.initialMessages;
+				}
+
 				const startResult = await this.sessionRuntime.startTaskSession({
 					taskId: request.taskId,
 					cwd: request.cwd,
 					prompt: runtimePrompt,
-					initialMessages: request.resumeFromTrash ? persistedResumeSnapshot?.messages : request.initialMessages,
+					initialMessages: sdkInitialMessages,
 					images: request.images,
 					providerId,
 					modelId,
