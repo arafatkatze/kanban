@@ -22,6 +22,7 @@ import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/ui/
 import { TASK_GIT_BASE_REF_PROMPT_VARIABLE, type TaskGitAction } from "@/git-actions/build-task-git-action-prompt";
 import { useRuntimeSettingsClineController } from "@/hooks/use-runtime-settings-cline-controller";
 import { useRuntimeSettingsClineMcpController } from "@/hooks/use-runtime-settings-cline-mcp-controller";
+import { THEMES, useTheme } from "@/hooks/use-theme";
 import { useLayoutCustomizations } from "@/resize/layout-customizations";
 import { openFileOnHost } from "@/runtime/runtime-config-query";
 import type {
@@ -298,6 +299,7 @@ export function RuntimeSettingsDialog({
 }): React.ReactElement {
 	const { config, isLoading, isSaving, save } = useRuntimeConfig(open, workspaceId, initialConfig);
 	const { resetLayoutCustomizations } = useLayoutCustomizations();
+	const { themeId, setThemeId } = useTheme();
 	const [selectedAgentId, setSelectedAgentId] = useState<RuntimeAgentId>("claude");
 	const [agentAutonomousModeEnabled, setAgentAutonomousModeEnabled] = useState(true);
 	const [readyForReviewNotificationsEnabled, setReadyForReviewNotificationsEnabled] = useState(true);
@@ -739,6 +741,29 @@ export function RuntimeSettingsDialog({
 						/>
 					) : null}
 				</div>
+
+				<h6 className="font-semibold text-text-primary mt-4 mb-2">Theme</h6>
+				<div className="flex flex-wrap gap-2">
+					{THEMES.map((theme) => (
+						<button
+							key={theme.id}
+							type="button"
+							aria-label={theme.label}
+							title={theme.label}
+							onClick={() => setThemeId(theme.id)}
+							className={cn(
+								"w-7 h-7 rounded-full border-2 cursor-pointer transition-all hover:scale-110",
+								themeId === theme.id ? "border-accent ring-2 ring-accent/40" : "border-transparent",
+							)}
+							style={{
+								background: `radial-gradient(circle at 60% 40%, ${theme.accent}, ${theme.surface})`,
+							}}
+						/>
+					))}
+				</div>
+				<p className="text-text-secondary text-[13px] mt-1.5 mb-0">
+					{THEMES.find((t) => t.id === themeId)?.label ?? "Default"} theme
+				</p>
 
 				<h6 className="font-semibold text-text-primary mt-4 mb-2">Layout</h6>
 				<Button size="sm" onClick={resetLayoutCustomizations}>

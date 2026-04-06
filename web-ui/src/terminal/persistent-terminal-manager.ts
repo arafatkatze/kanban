@@ -11,6 +11,7 @@ import type {
 	RuntimeTerminalWsClientMessage,
 	RuntimeTerminalWsServerMessage,
 } from "@/runtime/types";
+import { getTerminalThemeColors, type ThemeTerminalColors } from "@/hooks/use-theme";
 import { clearTerminalGeometry, reportTerminalGeometry } from "@/terminal/terminal-geometry-registry";
 import { createKanbanTerminalOptions } from "@/terminal/terminal-options";
 import {
@@ -28,6 +29,7 @@ const PARKING_ROOT_ID = "kb-persistent-terminal-parking-root";
 interface PersistentTerminalAppearance {
 	cursorColor: string;
 	terminalBackgroundColor: string;
+	themeColors?: ThemeTerminalColors;
 }
 
 interface PersistentTerminalSubscriber {
@@ -181,6 +183,7 @@ class PersistentTerminal {
 				cursorColor: this.appearance.cursorColor,
 				isMacPlatform,
 				terminalBackgroundColor: this.appearance.terminalBackgroundColor,
+				themeColors: this.appearance.themeColors ?? getTerminalThemeColors(),
 			}),
 			cols: initialGeometry.cols,
 			rows: initialGeometry.rows,
@@ -493,6 +496,7 @@ class PersistentTerminal {
 				cursorColor: appearance.cursorColor,
 				isMacPlatform,
 				terminalBackgroundColor: appearance.terminalBackgroundColor,
+				themeColors: appearance.themeColors ?? getTerminalThemeColors(),
 			}).theme,
 		};
 	}

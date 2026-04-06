@@ -10,6 +10,12 @@ import "@/styles/globals.css";
 
 initializeSentry();
 
+// Apply the persisted theme synchronously before first paint to prevent a flash.
+const _savedTheme = localStorage.getItem("kanban.theme");
+if (_savedTheme && _savedTheme !== "default") {
+	document.documentElement.setAttribute("data-theme", _savedTheme);
+}
+
 const root = document.getElementById("root");
 if (!root) {
 	throw new Error("Root element was not found.");
