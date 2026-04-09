@@ -278,6 +278,7 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 			}
 			terminalManagersByWorkspaceId.delete(workspaceId);
 			terminalManagerLoadPromises.delete(workspaceId);
+			void terminalManager.dispose();
 		}
 		projectTaskCountsByWorkspaceId.delete(workspaceId);
 		const workspacePath = workspacePathsById.get(workspaceId) ?? null;

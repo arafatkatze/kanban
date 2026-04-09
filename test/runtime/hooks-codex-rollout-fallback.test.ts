@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { resolveCodexSessionMetadataForCwd } from "../../src/commands/codex-hook-events";
 import { resolveCodexRolloutFinalMessageForCwd } from "../../src/commands/hooks";
 
 describe("resolveCodexRolloutFinalMessageForCwd", () => {
@@ -117,6 +118,41 @@ describe("resolveCodexRolloutFinalMessageForCwd", () => {
 
 			const resolved = await resolveCodexRolloutFinalMessageForCwd(taskCwd, sessionsRoot);
 			expect(resolved).toBe("Final answer from large file");
+		} finally {
+			await rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	it("resolves Codex session metadata for the matching cwd", async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "kanban-codex-rollout-"));
+		const sessionsRoot = join(tempDir, "sessions");
+		const taskCwd = "/tmp/kanban/task-session";
+
+		try {
+			const dateDir = join(sessionsRoot, "2026", "03", "29");
+			await mkdir(dateDir, { recursive: true });
+			await writeFile(
+				join(dateDir, "rollout-2026-03-29T00-00-05-session.jsonl"),
+				[
+					JSON.stringify({
+						type: "session_meta",
+						payload: {
+							meta: {
+								id: "thr_abc123",
+								cwd: taskCwd,
+							},
+						},
+					}),
+				].join("\n"),
+				"utf8",
+			);
+
+			const resolved = await resolveCodexSessionMetadataForCwd(taskCwd, { sessionsRoot });
+			expect(resolved).toMatchObject({
+				sessionId: "thr_abc123",
+				cwd: taskCwd,
+			});
+			expect(resolved?.filePath).toContain("rollout-2026-03-29T00-00-05-session.jsonl");
 		} finally {
 			await rm(tempDir, { recursive: true, force: true });
 		}

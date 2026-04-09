@@ -60,6 +60,13 @@ export interface CodexSessionWatcherOptions {
 	rolloutPollIntervalMs?: number;
 }
 
+export interface CodexSessionMetadata {
+	sessionId: string;
+	cwd: string;
+	filePath: string;
+	mtimeMs: number;
+}
+
 function normalizeWhitespace(value: string): string {
 	return value.replace(/\s+/g, " ").trim();
 }
@@ -351,6 +358,82 @@ async function findCodexRolloutFileForCwd(
 		if (prefix.includes(`"cwd":${encodedCwd}`)) {
 			return filePath;
 		}
+	}
+
+	return null;
+}
+
+function parseCodexSessionMetaFromRolloutText(prefix: string): Pick<CodexSessionMetadata, "sessionId" | "cwd"> | null {
+	const lines = prefix.split(/\r?\n/u);
+	for (const rawLine of lines) {
+		const line = rawLine.trim();
+		if (!line) {
+			continue;
+		}
+		const parsedLine = parseJsonObject(line);
+		if (!parsedLine || readStringField(parsedLine, "type") !== "session_meta") {
+			continue;
+		}
+		const payload = asRecord(parsedLine.payload);
+		const meta = payload ? asRecord(payload.meta) : null;
+		const sessionId = meta ? readStringField(meta, "id") : null;
+		const cwd = meta ? readStringField(meta, "cwd") : null;
+		if (sessionId && cwd) {
+			return {
+				sessionId,
+				cwd,
+			};
+		}
+	}
+	return null;
+}
+
+export async function resolveCodexSessionMetadataForCwd(
+	cwd: string,
+	options?: {
+		minModifiedAtMs?: number;
+		sessionsRoot?: string;
+	},
+): Promise<CodexSessionMetadata | null> {
+	if (!cwd.trim()) {
+		return null;
+	}
+	const sessionsRoot = options?.sessionsRoot ?? join(homedir(), ".codex", "sessions");
+	const minModifiedAtMs = options?.minModifiedAtMs ?? 0;
+	const normalizedCwd = normalizePathForComparison(cwd);
+	const rolloutFiles = (await listCodexRolloutFiles(sessionsRoot)).slice(0, MAX_CODEX_ROLLOUT_FILES_TO_SCAN);
+
+	for (const filePath of rolloutFiles) {
+		let fileStat: Stats;
+		try {
+			fileStat = await stat(filePath);
+		} catch {
+			continue;
+		}
+		if (fileStat.mtimeMs < minModifiedAtMs) {
+			continue;
+		}
+
+		let prefix = "";
+		try {
+			prefix = await readFilePrefix(filePath, Math.min(fileStat.size, CODEX_ROLLOUT_MATCH_SCAN_BYTES));
+		} catch {
+			continue;
+		}
+
+		const metadata = parseCodexSessionMetaFromRolloutText(prefix);
+		if (!metadata) {
+			continue;
+		}
+		if (normalizePathForComparison(metadata.cwd) !== normalizedCwd) {
+			continue;
+		}
+		return {
+			sessionId: metadata.sessionId,
+			cwd: metadata.cwd,
+			filePath,
+			mtimeMs: fileStat.mtimeMs,
+		};
 	}
 
 	return null;

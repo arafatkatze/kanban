@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract";
+import type {
+	CodexAppServerClient,
+	CodexRpcNotification,
+	CodexRpcServerRequest,
+} from "../../../src/codex-sdk/codex-app-server-client";
 import { buildShellCommandLine } from "../../../src/core/shell";
 import { TerminalSessionManager } from "../../../src/terminal/session-manager";
 
@@ -22,12 +27,115 @@ function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): Runt
 	};
 }
 
+function createDeferredPromise<T>() {
+	let resolvePromise: ((value: T | PromiseLike<T>) => void) | null = null;
+	let rejectPromise: ((reason?: unknown) => void) | null = null;
+	const promise = new Promise<T>((resolve, reject) => {
+		resolvePromise = resolve;
+		rejectPromise = reject;
+	});
+	return {
+		promise,
+		resolve: (value: T) => resolvePromise?.(value),
+		reject: (reason?: unknown) => rejectPromise?.(reason),
+	};
+}
+
+async function waitForAssertion(assertion: () => void, timeoutMs = 1_000): Promise<void> {
+	const startedAt = Date.now();
+	let lastError: unknown = null;
+	while (Date.now() - startedAt < timeoutMs) {
+		try {
+			assertion();
+			return;
+		} catch (error) {
+			lastError = error;
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+	}
+	if (lastError) {
+		throw lastError;
+	}
+	assertion();
+}
+
+class FakeCodexClient implements CodexAppServerClient {
+	readonly pid = 4242;
+	readonly requests: Array<{ method: string; params?: unknown }> = [];
+	readonly responses: Array<{ id: number | string; result: unknown }> = [];
+	readonly initialize = vi.fn(async () => undefined);
+	readonly notify = vi.fn();
+	readonly close = vi.fn(async () => undefined);
+
+	private readonly notificationListeners = new Set<(message: CodexRpcNotification) => void>();
+	private readonly serverRequestListeners = new Set<(message: CodexRpcServerRequest) => void>();
+	private readonly exitListeners = new Set<(error: Error | null) => void>();
+	private readonly requestHandlers = new Map<string, (params: unknown) => Promise<unknown> | unknown>();
+
+	setRequestHandler(method: string, handler: (params: unknown) => Promise<unknown> | unknown): void {
+		this.requestHandlers.set(method, handler);
+	}
+
+	async request<T>(method: string, params?: unknown): Promise<T> {
+		this.requests.push({ method, params });
+		const handler = this.requestHandlers.get(method);
+		if (!handler) {
+			throw new Error(`Missing fake Codex handler for ${method}`);
+		}
+		return (await handler(params)) as T;
+	}
+
+	respond(id: number | string, result: unknown): void {
+		this.responses.push({ id, result });
+	}
+
+	onNotification(listener: (message: CodexRpcNotification) => void): () => void {
+		this.notificationListeners.add(listener);
+		return () => {
+			this.notificationListeners.delete(listener);
+		};
+	}
+
+	onServerRequest(listener: (message: CodexRpcServerRequest) => void): () => void {
+		this.serverRequestListeners.add(listener);
+		return () => {
+			this.serverRequestListeners.delete(listener);
+		};
+	}
+
+	onExit(listener: (error: Error | null) => void): () => void {
+		this.exitListeners.add(listener);
+		return () => {
+			this.exitListeners.delete(listener);
+		};
+	}
+
+	emitNotification(message: CodexRpcNotification): void {
+		for (const listener of this.notificationListeners) {
+			listener(message);
+		}
+	}
+
+	emitServerRequest(request: CodexRpcServerRequest): void {
+		for (const listener of this.serverRequestListeners) {
+			listener(request);
+		}
+	}
+
+	emitExit(error: Error | null): void {
+		for (const listener of this.exitListeners) {
+			listener(error);
+		}
+	}
+}
+
 describe("TerminalSessionManager", () => {
 	it("clears trust prompt state when transitioning to review", () => {
 		const manager = new TerminalSessionManager();
 		const entry = {
 			summary: createSummary({ state: "running", reviewReason: null }),
 			active: {
+				kind: "pty",
 				workspaceTrustBuffer: "trust this folder",
 				awaitingCodexPromptAfterEnter: true,
 			},
@@ -114,6 +222,7 @@ describe("TerminalSessionManager", () => {
 		const entry = {
 			summary: createSummary({ taskId: "task-probe", state: "running" }),
 			active: {
+				kind: "pty",
 				session: {},
 				terminalProtocolFilter: {
 					pendingChunk: null,
@@ -144,6 +253,7 @@ describe("TerminalSessionManager", () => {
 		const entry = {
 			summary: createSummary({ taskId: "task-control-first", state: "running" }),
 			active: {
+				kind: "pty",
 				session: {
 					write: vi.fn(),
 				},
@@ -179,6 +289,7 @@ describe("TerminalSessionManager", () => {
 		const entry = {
 			summary: createSummary({ taskId: "task-resize", state: "running" }),
 			active: {
+				kind: "pty",
 				session: {
 					resize: resizeSpy,
 				},
@@ -233,5 +344,136 @@ describe("TerminalSessionManager", () => {
 			rows: 40,
 		});
 		expect(getSnapshotSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it("falls back to the persisted terminal restore snapshot when no live mirror exists", async () => {
+		const manager = new TerminalSessionManager();
+		manager.hydrateFromRecord({
+			"task-restore": createSummary({
+				taskId: "task-restore",
+				state: "idle",
+				terminalRestoreSnapshot: "persisted terminal",
+				terminalRestoreCols: 132,
+				terminalRestoreRows: 44,
+			}),
+		});
+
+		const snapshot = await manager.getRestoreSnapshot("task-restore");
+
+		expect(snapshot).toEqual({
+			snapshot: "persisted terminal",
+			cols: 132,
+			rows: 44,
+		});
+	});
+
+	it("falls back to a fresh Codex thread when exact resume fails", async () => {
+		const fakeClient = new FakeCodexClient();
+		fakeClient.setRequestHandler("thread/resume", async () => {
+			throw new Error("thread not found");
+		});
+		fakeClient.setRequestHandler("thread/start", async () => ({
+			thread: {
+				id: "thr-new",
+				cwd: "/tmp/worktree",
+				turns: [],
+			},
+		}));
+		const manager = new TerminalSessionManager({
+			createCodexClient: () => fakeClient,
+		});
+
+		const summary = await manager.startTaskSession({
+			taskId: "task-codex-fallback",
+			agentId: "codex",
+			binary: "codex",
+			args: [],
+			cwd: "/tmp/worktree",
+			prompt: "",
+			resumeSessionId: "thr-old",
+		});
+
+		expect(summary.agentSessionId).toBe("thr-old");
+		await waitForAssertion(() => {
+			expect(manager.getSummary("task-codex-fallback")?.agentSessionId).toBe("thr-new");
+		});
+		expect(fakeClient.requests.map((request) => request.method)).toEqual([
+			"thread/resume",
+			"thread/start",
+		]);
+	});
+
+	it("queues Codex input until attach completes and then starts the turn", async () => {
+		const fakeClient = new FakeCodexClient();
+		const attachDeferred = createDeferredPromise<Record<string, unknown>>();
+		fakeClient.setRequestHandler("thread/start", () => attachDeferred.promise);
+		fakeClient.setRequestHandler("turn/start", async (params) => ({
+			turn: {
+				id: "turn-1",
+			},
+			params,
+		}));
+		const manager = new TerminalSessionManager({
+			createCodexClient: () => fakeClient,
+		});
+
+		await manager.startTaskSession({
+			taskId: "task-codex-queue",
+			agentId: "codex",
+			binary: "codex",
+			args: [],
+			cwd: "/tmp/worktree",
+			prompt: "",
+		});
+
+		manager.writeInput("task-codex-queue", Buffer.from("hello\r", "utf8"));
+		await waitForAssertion(() => {
+			expect(fakeClient.requests.map((request) => request.method)).toContain("thread/start");
+		});
+
+		attachDeferred.resolve({
+			thread: {
+				id: "thr-queued",
+				cwd: "/tmp/worktree",
+				turns: [],
+			},
+		});
+
+		await waitForAssertion(() => {
+			expect(fakeClient.requests.map((request) => request.method)).toContain("turn/start");
+		});
+		const turnStartRequest = fakeClient.requests.find((request) => request.method === "turn/start");
+		expect(turnStartRequest).toBeDefined();
+		expect(JSON.stringify(turnStartRequest?.params)).toContain("hello");
+	});
+
+	it("closes the shared Codex host when the terminal manager is disposed", async () => {
+		const fakeClient = new FakeCodexClient();
+		fakeClient.setRequestHandler("thread/start", async () => ({
+			thread: {
+				id: "thr-dispose",
+				cwd: "/tmp/worktree",
+				turns: [],
+			},
+		}));
+		const manager = new TerminalSessionManager({
+			createCodexClient: () => fakeClient,
+		});
+
+		await manager.startTaskSession({
+			taskId: "task-codex-dispose",
+			agentId: "codex",
+			binary: "codex",
+			args: [],
+			cwd: "/tmp/worktree",
+			prompt: "",
+		});
+		await waitForAssertion(() => {
+			expect(manager.getSummary("task-codex-dispose")?.agentSessionId).toBe("thr-dispose");
+		});
+
+		await manager.dispose();
+
+		expect(fakeClient.close).toHaveBeenCalledTimes(1);
 	});
 });

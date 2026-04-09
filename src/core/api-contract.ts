@@ -215,7 +215,9 @@ export const runtimeTaskSessionSummarySchema = z.object({
 	state: runtimeTaskSessionStateSchema,
 	mode: runtimeTaskSessionModeSchema.nullable().optional(),
 	agentId: runtimeAgentIdSchema.nullable(),
+	agentSessionId: z.string().nullable().optional(),
 	workspacePath: z.string().nullable(),
+	lastKnownWorkspacePath: z.string().nullable().optional(),
 	pid: z.number().nullable(),
 	startedAt: z.number().nullable(),
 	updatedAt: z.number(),
@@ -227,6 +229,9 @@ export const runtimeTaskSessionSummarySchema = z.object({
 	warningMessage: z.string().nullable().optional(),
 	latestTurnCheckpoint: runtimeTaskTurnCheckpointSchema.nullable().optional(),
 	previousTurnCheckpoint: runtimeTaskTurnCheckpointSchema.nullable().optional(),
+	terminalRestoreSnapshot: z.string().nullable().optional(),
+	terminalRestoreCols: z.number().int().positive().nullable().optional(),
+	terminalRestoreRows: z.number().int().positive().nullable().optional(),
 });
 export type RuntimeTaskSessionSummary = z.infer<typeof runtimeTaskSessionSummarySchema>;
 

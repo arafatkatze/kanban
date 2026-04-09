@@ -44,6 +44,10 @@ interface MountPersistentTerminalOptions {
 	isVisible?: boolean;
 }
 
+type PendingUserInput =
+	| { kind: "raw"; data: string | Uint8Array }
+	| { kind: "terminal"; action: "input" | "paste"; text: string };
+
 interface EnsurePersistentTerminalInput extends PersistentTerminalAppearance {
 	taskId: string;
 	workspaceId: string;
@@ -161,6 +165,7 @@ class PersistentTerminal {
 	private restoreCompleted = false;
 	private outputTextDecoder = new TextDecoder();
 	private terminalWriteQueue: Promise<void> = Promise.resolve();
+	private readonly pendingUserInput: PendingUserInput[] = [];
 	private disposed = false;
 
 	constructor(
@@ -267,11 +272,58 @@ class PersistentTerminal {
 	}
 
 	private sendIoData(data: string | Uint8Array): boolean {
-		if (!this.ioSocket || this.ioSocket.readyState !== WebSocket.OPEN) {
+		if (!this.canSendUserInput()) {
+			return this.enqueuePendingUserInput({
+				kind: "raw",
+				data,
+			});
+		}
+		const ioSocket = this.ioSocket;
+		if (!ioSocket || ioSocket.readyState !== WebSocket.OPEN) {
+			return this.enqueuePendingUserInput({
+				kind: "raw",
+				data,
+			});
+		}
+		ioSocket.send(data);
+		return true;
+	}
+
+	private canSendUserInput(): boolean {
+		return Boolean(this.restoreCompleted && this.ioSocket && this.ioSocket.readyState === WebSocket.OPEN);
+	}
+
+	private enqueuePendingUserInput(input: PendingUserInput): boolean {
+		if (this.disposed) {
 			return false;
 		}
-		this.ioSocket.send(data);
+		this.pendingUserInput.push(input);
 		return true;
+	}
+
+	private flushPendingUserInput(): void {
+		if (!this.canSendUserInput() || this.pendingUserInput.length === 0) {
+			return;
+		}
+
+		while (this.pendingUserInput.length > 0) {
+			if (!this.canSendUserInput()) {
+				return;
+			}
+			const next = this.pendingUserInput.shift();
+			if (!next) {
+				return;
+			}
+			if (next.kind === "raw") {
+				this.ioSocket?.send(next.data);
+				continue;
+			}
+			if (next.action === "paste") {
+				this.terminal.paste(next.text);
+				continue;
+			}
+			this.terminal.input(next.text);
+		}
 	}
 
 	private enqueueTerminalWrite(
@@ -377,6 +429,7 @@ class PersistentTerminal {
 				this.requestResize();
 			}
 			if (this.restoreCompleted) {
+				this.flushPendingUserInput();
 				this.notifyConnectionReady();
 			}
 		};
@@ -432,6 +485,7 @@ class PersistentTerminal {
 							this.requestResize();
 						}
 						if (this.ioSocket) {
+							this.flushPendingUserInput();
 							this.notifyConnectionReady();
 						}
 					})
@@ -581,16 +635,24 @@ class PersistentTerminal {
 	}
 
 	input(text: string): boolean {
-		if (!this.ioSocket || this.ioSocket.readyState !== WebSocket.OPEN) {
-			return false;
+		if (!this.canSendUserInput()) {
+			return this.enqueuePendingUserInput({
+				kind: "terminal",
+				action: "input",
+				text,
+			});
 		}
 		this.terminal.input(text);
 		return true;
 	}
 
 	paste(text: string): boolean {
-		if (!this.ioSocket || this.ioSocket.readyState !== WebSocket.OPEN) {
-			return false;
+		if (!this.canSendUserInput()) {
+			return this.enqueuePendingUserInput({
+				kind: "terminal",
+				action: "paste",
+				text,
+			});
 		}
 		this.terminal.paste(text);
 		return true;
@@ -690,6 +752,7 @@ class PersistentTerminal {
 		this.controlSocket?.close();
 		this.ioSocket = null;
 		this.controlSocket = null;
+		this.pendingUserInput.length = 0;
 		this.subscribers.clear();
 		this.terminal.dispose();
 		this.hostElement.remove();
