@@ -276,6 +276,9 @@ export function createCodexAppServerClient(
 			initializePromise = (async () => {
 				await request("initialize", {
 					clientInfo,
+					capabilities: {
+						experimentalApi: true,
+					},
 				});
 				writeMessage({
 					method: "initialized",

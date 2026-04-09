@@ -312,8 +312,8 @@ function buildCodexTurnSandboxPolicy(
 	};
 }
 
-function buildCodexApprovalPolicy(autonomousModeEnabled: boolean | undefined): "never" | "unlessTrusted" {
-	return autonomousModeEnabled ? "never" : "unlessTrusted";
+function buildCodexApprovalPolicy(autonomousModeEnabled: boolean | undefined): "never" | "untrusted" {
+	return autonomousModeEnabled ? "never" : "untrusted";
 }
 
 function extractCodexThreadId(value: unknown): string | null {
