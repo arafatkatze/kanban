@@ -437,7 +437,7 @@ describe("ClineAgentChatPanel", () => {
 		expect(scroll.getScrollTop()).toBe(320);
 	});
 
-	it("hides the thinking indicator while assistant text is streaming", async () => {
+	it("shows the thinking indicator while assistant text is streaming", async () => {
 		const messages: ClineChatMessage[] = [
 			{
 				id: "assistant-1",
@@ -468,10 +468,10 @@ describe("ClineAgentChatPanel", () => {
 		});
 
 		expect(container.textContent).toContain("Streaming reply");
-		expect(container.textContent).not.toContain("Thinking...");
+		expect(container.textContent).toContain("Thinking...");
 	});
 
-	it("hides the thinking indicator while a tool call is streaming", async () => {
+	it("shows the thinking indicator while a tool call is streaming", async () => {
 		const messages: ClineChatMessage[] = [
 			{
 				id: "tool-1",
@@ -507,7 +507,7 @@ describe("ClineAgentChatPanel", () => {
 		});
 
 		expect(container.textContent).toContain("Read");
-		expect(container.textContent).not.toContain("Thinking...");
+		expect(container.textContent).toContain("Thinking...");
 	});
 
 	it("renders assistant markdown including fenced code blocks", async () => {

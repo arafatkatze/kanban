@@ -1,7 +1,7 @@
 // Builds the view model for the native Cline chat panel.
 // Keep panel-specific UI state here so the panel component can stay mostly
 // declarative and shared across detail and sidebar surfaces.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import type { ClineChatActionResult } from "@/hooks/use-cline-chat-runtime-actions";
 import { type ClineChatMessage, useClineChatSession } from "@/hooks/use-cline-chat-session";
@@ -47,85 +47,6 @@ interface UseClineChatPanelControllerResult {
 	handleCancelTurn: () => void;
 }
 
-function isTurnResponseMessage(message: ClineChatMessage | null): boolean {
-	return (
-		message?.role === "assistant" ||
-		message?.role === "reasoning" ||
-		message?.role === "tool" ||
-		message?.role === "system" ||
-		message?.role === "status"
-	);
-}
-
-function getTurnStartTimestamp(summary: RuntimeTaskSessionSummary | null): number | null {
-	if (summary?.state !== "running" || summary.latestHookActivity?.hookEventName !== "turn_start") {
-		return null;
-	}
-	return summary.lastHookAt ?? summary.updatedAt ?? null;
-}
-
-function hasSummaryTurnResponse(summary: RuntimeTaskSessionSummary | null): boolean {
-	if (summary?.state !== "running") {
-		return false;
-	}
-
-	const hookEventName = summary.latestHookActivity?.hookEventName ?? null;
-	return hookEventName !== null && hookEventName !== "turn_start";
-}
-
-function isCurrentTurnResponseMessage(message: ClineChatMessage | null, turnStartTimestamp: number | null): boolean {
-	if (message === null || !isTurnResponseMessage(message)) {
-		return false;
-	}
-	if (turnStartTimestamp === null) {
-		return true;
-	}
-	return message.createdAt >= turnStartTimestamp;
-}
-
-function hasCurrentTurnResponseInMessages(
-	messages: ClineChatMessage[] | null,
-	turnStartTimestamp: number | null,
-): boolean {
-	return messages?.some((message) => isCurrentTurnResponseMessage(message, turnStartTimestamp)) ?? false;
-}
-
-function useHasSeenCurrentTurnResponse(
-	messages: ClineChatMessage[],
-	summary: RuntimeTaskSessionSummary | null,
-	incomingMessages: ClineChatMessage[] | null,
-	incomingMessage: ClineChatMessage | null,
-): boolean {
-	const turnStartTimestampFromSummary = getTurnStartTimestamp(summary);
-	const [turnStartTimestamp, setTurnStartTimestamp] = useState<number | null>(() => turnStartTimestampFromSummary);
-	const effectiveTurnStartTimestamp = turnStartTimestampFromSummary ?? turnStartTimestamp;
-	const hasIncomingResponse =
-		isCurrentTurnResponseMessage(incomingMessage, effectiveTurnStartTimestamp) ||
-		hasCurrentTurnResponseInMessages(incomingMessages, effectiveTurnStartTimestamp) ||
-		hasCurrentTurnResponseInMessages(messages, effectiveTurnStartTimestamp);
-	const hasSummaryResponse = hasSummaryTurnResponse(summary);
-	const [hasSeenCurrentTurnResponse, setHasSeenCurrentTurnResponse] = useState(
-		() => isTurnResponseMessage(incomingMessage) || hasSummaryResponse,
-	);
-
-	useEffect(() => {
-		if (summary?.state !== "running") {
-			setTurnStartTimestamp(null);
-			setHasSeenCurrentTurnResponse(false);
-			return;
-		}
-
-		if (turnStartTimestampFromSummary !== null) {
-			setTurnStartTimestamp(turnStartTimestampFromSummary);
-			setHasSeenCurrentTurnResponse(hasIncomingResponse || hasSummaryResponse);
-		} else if (hasIncomingResponse || hasSummaryResponse) {
-			setHasSeenCurrentTurnResponse(true);
-		}
-	}, [hasIncomingResponse, hasSummaryResponse, summary?.state, turnStartTimestampFromSummary]);
-
-	return hasSeenCurrentTurnResponse || hasIncomingResponse || hasSummaryResponse;
-}
-
 export function useClineChatPanelController({
 	taskId,
 	summary,
@@ -159,13 +80,7 @@ export function useClineChatPanelController({
 		(reviewWorkspaceSnapshot?.changedFiles ?? 0) > 0 &&
 		Boolean(onCommit) &&
 		Boolean(onOpenPr);
-	const hasSeenCurrentTurnResponse = useHasSeenCurrentTurnResponse(
-		messages,
-		summary,
-		incomingMessages,
-		incomingMessage,
-	);
-	const showAgentProgressIndicator = summary?.state === "running" && !hasSeenCurrentTurnResponse;
+	const showAgentProgressIndicator = summary?.state === "running";
 	const showActionFooter = showMoveToTrash && Boolean(onMoveToTrash);
 	const showCancelAutomaticAction = Boolean(cancelAutomaticActionLabel && onCancelAutomaticAction);
 

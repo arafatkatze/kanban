@@ -166,7 +166,6 @@ describe("useClineChatPanelController", () => {
 	let previousActEnvironment: boolean | undefined;
 
 	beforeEach(() => {
-		vi.useFakeTimers();
 		previousActEnvironment = (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean })
 			.IS_REACT_ACT_ENVIRONMENT;
 		(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -188,7 +187,6 @@ describe("useClineChatPanelController", () => {
 			(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
 				previousActEnvironment;
 		}
-		vi.useRealTimers();
 	});
 
 	it("clears the draft and appends the returned chat message after send", async () => {
@@ -313,7 +311,7 @@ describe("useClineChatPanelController", () => {
 		expect(requireSnapshot(latestSnapshot).showReviewActions).toBe(false);
 	});
 
-	it("hides the thinking indicator as soon as an assistant stream event arrives", async () => {
+	it("keeps the thinking indicator visible while assistant text is streaming", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 
 		await act(async () => {
@@ -336,10 +334,10 @@ describe("useClineChatPanelController", () => {
 			await Promise.resolve();
 		});
 
-		expect(requireSnapshot(latestSnapshot).showAgentProgressIndicator).toBe(false);
+		expect(requireSnapshot(latestSnapshot).showAgentProgressIndicator).toBe(true);
 	});
 
-	it("hides the thinking indicator when assistant chunks arrive through incomingMessages only", async () => {
+	it("keeps the thinking indicator visible when assistant chunks arrive through incomingMessages only", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 
 		await act(async () => {
@@ -362,13 +360,7 @@ describe("useClineChatPanelController", () => {
 			await Promise.resolve();
 		});
 
-		expect(requireSnapshot(latestSnapshot).showAgentProgressIndicator).toBe(false);
-
-		await act(async () => {
-			vi.advanceTimersByTime(501);
-		});
-
-		expect(requireSnapshot(latestSnapshot).showAgentProgressIndicator).toBe(false);
+		expect(requireSnapshot(latestSnapshot).showAgentProgressIndicator).toBe(true);
 
 		await act(async () => {
 			root.render(
@@ -390,10 +382,10 @@ describe("useClineChatPanelController", () => {
 			await Promise.resolve();
 		});
 
-		expect(requireSnapshot(latestSnapshot).showAgentProgressIndicator).toBe(false);
+		expect(requireSnapshot(latestSnapshot).showAgentProgressIndicator).toBe(true);
 	});
 
-	it("keeps the thinking indicator hidden after assistant activity begins", async () => {
+	it("keeps the thinking indicator visible after assistant activity begins", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 
 		await act(async () => {
@@ -416,16 +408,10 @@ describe("useClineChatPanelController", () => {
 			await Promise.resolve();
 		});
 
-		expect(requireSnapshot(latestSnapshot).showAgentProgressIndicator).toBe(false);
-
-		await act(async () => {
-			vi.advanceTimersByTime(501);
-		});
-
-		expect(requireSnapshot(latestSnapshot).showAgentProgressIndicator).toBe(false);
+		expect(requireSnapshot(latestSnapshot).showAgentProgressIndicator).toBe(true);
 	});
 
-	it("shows the thinking indicator again when a new turn starts", async () => {
+	it("keeps the thinking indicator visible when a new turn starts", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 
 		await act(async () => {
@@ -448,7 +434,7 @@ describe("useClineChatPanelController", () => {
 			await Promise.resolve();
 		});
 
-		expect(requireSnapshot(latestSnapshot).showAgentProgressIndicator).toBe(false);
+		expect(requireSnapshot(latestSnapshot).showAgentProgressIndicator).toBe(true);
 
 		await act(async () => {
 			root.render(
@@ -475,34 +461,21 @@ describe("useClineChatPanelController", () => {
 		expect(requireSnapshot(latestSnapshot).showAgentProgressIndicator).toBe(true);
 	});
 
-	it("ignores older chat history until the current turn gets its first response", async () => {
+	it("shows the thinking indicator while a tool call row is visible", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
-		const turnStartAt = 1_000;
 
 		await act(async () => {
 			root.render(
 				<HookHarness
 					summary={createSummary("running", {
-						updatedAt: turnStartAt,
-						lastHookAt: turnStartAt,
-						latestHookActivity: {
-							activityText: "Agent active",
-							toolName: null,
-							toolInputSummary: null,
-							finalMessage: null,
-							hookEventName: "turn_start",
-							notificationType: null,
-							source: "cline-sdk",
-						},
+						latestHookActivity: createHookActivity("assistant_delta"),
 					})}
-					incomingMessages={[
-						{
-							id: "assistant-old",
-							role: "assistant",
-							content: "Previous turn output",
-							createdAt: turnStartAt - 10,
-						},
-					]}
+					incomingMessage={{
+						id: "assistant-1",
+						role: "assistant",
+						content: "Let me edit this file",
+						createdAt: 2,
+					}}
 					onSnapshot={(snapshot) => {
 						latestSnapshot = snapshot;
 					}}
@@ -512,50 +485,6 @@ describe("useClineChatPanelController", () => {
 		});
 
 		expect(requireSnapshot(latestSnapshot).showAgentProgressIndicator).toBe(true);
-
-		await act(async () => {
-			root.render(
-				<HookHarness
-					summary={createSummary("running", {
-						updatedAt: turnStartAt,
-						lastHookAt: turnStartAt,
-						latestHookActivity: {
-							activityText: "Agent active",
-							toolName: null,
-							toolInputSummary: null,
-							finalMessage: null,
-							hookEventName: "turn_start",
-							notificationType: null,
-							source: "cline-sdk",
-						},
-					})}
-					incomingMessages={[
-						{
-							id: "assistant-old",
-							role: "assistant",
-							content: "Previous turn output",
-							createdAt: turnStartAt - 10,
-						},
-					]}
-					incomingMessage={{
-						id: "assistant-new",
-						role: "assistant",
-						content: "New turn output",
-						createdAt: turnStartAt + 1,
-					}}
-					onSnapshot={(snapshot) => {
-						latestSnapshot = snapshot;
-					}}
-				/>,
-			);
-			await Promise.resolve();
-		});
-
-		expect(requireSnapshot(latestSnapshot).showAgentProgressIndicator).toBe(false);
-	});
-
-	it("keeps the thinking indicator hidden while a tool call row is visible", async () => {
-		let latestSnapshot: HookSnapshot | null = null;
 
 		await act(async () => {
 			root.render(
@@ -581,10 +510,6 @@ describe("useClineChatPanelController", () => {
 			await Promise.resolve();
 		});
 
-		await act(async () => {
-			vi.advanceTimersByTime(1_000);
-		});
-
-		expect(requireSnapshot(latestSnapshot).showAgentProgressIndicator).toBe(false);
+		expect(requireSnapshot(latestSnapshot).showAgentProgressIndicator).toBe(true);
 	});
 });
