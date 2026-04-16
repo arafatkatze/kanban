@@ -233,7 +233,7 @@ describe("getProviderModels", () => {
 		await rm(CLINE_RECOMMENDED_MODELS_CACHE_PATH, { force: true });
 	});
 
-	it("uses the cline endpoints for live models plus recommended and free rankings", async () => {
+	it("merges missing featured models back into the cline model list", async () => {
 		setSelectedProviderSettings({
 			provider: "cline",
 			baseUrl: "https://api.cline.bot",
@@ -246,7 +246,6 @@ describe("getProviderModels", () => {
 						data: [
 							{ id: "anthropic/claude-opus-4.7", name: "Claude Opus 4.7", supported_parameters: ["reasoning"] },
 							{ id: "anthropic/claude-sonnet-4.6", name: "Claude Sonnet 4.6" },
-							{ id: "bytedance/seed-2-0-pro", name: "Seed 2.0 Pro" },
 						],
 					}),
 				};
@@ -269,6 +268,11 @@ describe("getProviderModels", () => {
 		expect(localProviderMocks.getLocalProviderModels).not.toHaveBeenCalled();
 		expect(result.models).toEqual([
 			{
+				id: "bytedance/seed-2-0-pro",
+				name: "bytedance/seed-2-0-pro",
+				freeRank: 0,
+			},
+			{
 				id: "anthropic/claude-opus-4.7",
 				name: "Claude Opus 4.7",
 				supportsReasoningEffort: true,
@@ -278,11 +282,6 @@ describe("getProviderModels", () => {
 				id: "anthropic/claude-sonnet-4.6",
 				name: "Claude Sonnet 4.6",
 				recommendedRank: 0,
-			},
-			{
-				id: "bytedance/seed-2-0-pro",
-				name: "Seed 2.0 Pro",
-				freeRank: 0,
 			},
 		]);
 	});

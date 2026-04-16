@@ -20,6 +20,11 @@ const recommendedModelsSchema = z.object({
 
 export type ClineFeaturedModel = z.infer<typeof recommendedModelSchema>;
 export type ClineRecommendedModelsData = z.infer<typeof recommendedModelsSchema>;
+export type ClineRecommendedModelsDataSource = "remote" | "cache" | "fallback";
+export interface ClineRecommendedModelsFetchResult {
+	data: ClineRecommendedModelsData;
+	source: ClineRecommendedModelsDataSource;
+}
 
 const CLINE_RECOMMENDED_MODEL_IDS_FALLBACK = [
 	"google/gemini-3.1-pro-preview",
@@ -29,8 +34,8 @@ const CLINE_RECOMMENDED_MODEL_IDS_FALLBACK = [
 ] as const;
 const CLINE_FREE_MODEL_IDS_FALLBACK = ["kwaipilot/kat-coder-pro", "arcee-ai/trinity-large-preview:free"] as const;
 
-let inMemoryCache: { apiBaseUrl: string; data: ClineRecommendedModelsData; timestamp: number } | null = null;
-let pendingRefresh: Promise<ClineRecommendedModelsData> | null = null;
+let inMemoryCache: { apiBaseUrl: string; result: ClineRecommendedModelsFetchResult; timestamp: number } | null = null;
+let pendingRefresh: Promise<ClineRecommendedModelsFetchResult> | null = null;
 
 function normalizeFeaturedModels(models: readonly ClineFeaturedModel[]): ClineFeaturedModel[] {
 	const featuredModelsById = new Map<string, ClineFeaturedModel>();
@@ -86,7 +91,7 @@ async function writeCachedRecommendedModels(data: ClineRecommendedModelsData): P
 	await writeFile(resolveCacheFilePath(), `${JSON.stringify(data, null, 2)}\n`, "utf8");
 }
 
-async function fetchAndCacheRecommendedModels(apiBaseUrl: string): Promise<ClineRecommendedModelsData> {
+async function fetchAndCacheRecommendedModels(apiBaseUrl: string): Promise<ClineRecommendedModelsFetchResult> {
 	try {
 		const response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/api/v1/ai/cline/recommended-models`);
 		if (!response.ok) {
@@ -101,25 +106,34 @@ async function fetchAndCacheRecommendedModels(apiBaseUrl: string): Promise<Cline
 		const data = normalizeRecommendedModels(parsed.data);
 		if (data.recommended.length > 0 || data.free.length > 0) {
 			await writeCachedRecommendedModels(data);
-			return data;
+			return {
+				data,
+				source: "remote",
+			};
 		}
 	} catch {
 		const cachedData = await readCachedRecommendedModels();
 		if (cachedData && (cachedData.recommended.length > 0 || cachedData.free.length > 0)) {
-			return cachedData;
+			return {
+				data: cachedData,
+				source: "cache",
+			};
 		}
 	}
 
-	return getFallbackRecommendedModels();
+	return {
+		data: getFallbackRecommendedModels(),
+		source: "fallback",
+	};
 }
 
-export async function fetchClineRecommendedModelsData(apiBaseUrl: string): Promise<ClineRecommendedModelsData> {
+export async function fetchClineRecommendedModels(apiBaseUrl: string): Promise<ClineRecommendedModelsFetchResult> {
 	if (
 		inMemoryCache &&
 		inMemoryCache.apiBaseUrl === apiBaseUrl &&
 		Date.now() - inMemoryCache.timestamp <= CLINE_RECOMMENDED_MODELS_CACHE_TTL_MS
 	) {
-		return inMemoryCache.data;
+		return inMemoryCache.result;
 	}
 
 	if (pendingRefresh) {
@@ -128,21 +142,25 @@ export async function fetchClineRecommendedModelsData(apiBaseUrl: string): Promi
 
 	pendingRefresh = (async () => {
 		try {
-			const data = await fetchAndCacheRecommendedModels(apiBaseUrl);
-			if (data.recommended.length > 0 || data.free.length > 0) {
+			const result = await fetchAndCacheRecommendedModels(apiBaseUrl);
+			if (result.data.recommended.length > 0 || result.data.free.length > 0) {
 				inMemoryCache = {
 					apiBaseUrl,
-					data,
+					result,
 					timestamp: Date.now(),
 				};
 			}
-			return data;
+			return result;
 		} finally {
 			pendingRefresh = null;
 		}
 	})();
 
 	return pendingRefresh;
+}
+
+export async function fetchClineRecommendedModelsData(apiBaseUrl: string): Promise<ClineRecommendedModelsData> {
+	return (await fetchClineRecommendedModels(apiBaseUrl)).data;
 }
 
 export async function fetchClineRecommendedModelIds(apiBaseUrl: string): Promise<string[]> {
