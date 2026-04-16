@@ -99,8 +99,10 @@ vi.mock("../../../src/server/browser.js", () => ({
 }));
 
 import { createClineProviderService } from "../../../src/cline-sdk/cline-provider-service";
+import { resetClineProviderModelsCacheForTests } from "../../../src/cline-sdk/cline-provider-models";
 import { resetClineRecommendedModelsCacheForTests } from "../../../src/cline-sdk/cline-recommended-models";
 
+const CLINE_PROVIDER_MODELS_CACHE_PATH = join("/tmp", "cline-provider-models.json");
 const CLINE_RECOMMENDED_MODELS_CACHE_PATH = join("/tmp", "cline-recommended-models.json");
 
 function setSelectedProviderSettings(
@@ -224,30 +226,38 @@ describe("getClineAccountBalance", () => {
 describe("getProviderModels", () => {
 	beforeEach(async () => {
 		vi.clearAllMocks();
+		resetClineProviderModelsCacheForTests();
 		resetClineRecommendedModelsCacheForTests();
 		vi.unstubAllGlobals();
+		await rm(CLINE_PROVIDER_MODELS_CACHE_PATH, { force: true });
 		await rm(CLINE_RECOMMENDED_MODELS_CACHE_PATH, { force: true });
 	});
 
-	it("annotates cline models using the recommended models endpoint", async () => {
+	it("uses the cline endpoints for live models plus recommended and free rankings", async () => {
 		setSelectedProviderSettings({
 			provider: "cline",
 			baseUrl: "https://api.cline.bot",
 		});
-		localProviderMocks.getLocalProviderModels.mockResolvedValue({
-			providerId: "cline",
-			models: [
-				{ id: "openai/gpt-5.4", name: "GPT-5.4" },
-				{ id: "anthropic/claude-sonnet-4.6", name: "Claude Sonnet 4.6" },
-				{ id: "openai/gpt-5.2", name: "GPT-5.2" },
-			],
-		});
-		const fetchMock = vi.fn().mockResolvedValue({
-			ok: true,
-			json: async () => ({
-				recommended: [{ id: "anthropic/claude-sonnet-4.6" }, { id: "openai/gpt-5.4" }],
-				free: [],
-			}),
+		const fetchMock = vi.fn(async (input: string) => {
+			if (input.endsWith("/api/v1/ai/cline/models")) {
+				return {
+					ok: true,
+					json: async () => ({
+						data: [
+							{ id: "anthropic/claude-opus-4.7", name: "Claude Opus 4.7", supported_parameters: ["reasoning"] },
+							{ id: "anthropic/claude-sonnet-4.6", name: "Claude Sonnet 4.6" },
+							{ id: "bytedance/seed-2-0-pro", name: "Seed 2.0 Pro" },
+						],
+					}),
+				};
+			}
+			return {
+				ok: true,
+				json: async () => ({
+					recommended: [{ id: "anthropic/claude-sonnet-4.6" }, { id: "anthropic/claude-opus-4.7" }],
+					free: [{ id: "bytedance/seed-2-0-pro" }],
+				}),
+			};
 		});
 		vi.stubGlobal("fetch", fetchMock);
 
@@ -255,20 +265,24 @@ describe("getProviderModels", () => {
 		const result = await service.getProviderModels("cline");
 
 		expect(fetchMock).toHaveBeenCalledWith("https://api.cline.bot/api/v1/ai/cline/recommended-models");
+		expect(fetchMock).toHaveBeenCalledWith("https://api.cline.bot/api/v1/ai/cline/models");
+		expect(localProviderMocks.getLocalProviderModels).not.toHaveBeenCalled();
 		expect(result.models).toEqual([
+			{
+				id: "anthropic/claude-opus-4.7",
+				name: "Claude Opus 4.7",
+				supportsReasoningEffort: true,
+				recommendedRank: 1,
+			},
 			{
 				id: "anthropic/claude-sonnet-4.6",
 				name: "Claude Sonnet 4.6",
 				recommendedRank: 0,
 			},
 			{
-				id: "openai/gpt-5.2",
-				name: "GPT-5.2",
-			},
-			{
-				id: "openai/gpt-5.4",
-				name: "GPT-5.4",
-				recommendedRank: 1,
+				id: "bytedance/seed-2-0-pro",
+				name: "Seed 2.0 Pro",
+				freeRank: 0,
 			},
 		]);
 	});

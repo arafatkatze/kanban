@@ -21,7 +21,8 @@ import type {
 	RuntimeClineReasoningEffort,
 } from "../core/api-contract";
 import { openInBrowser } from "../server/browser";
-import { fetchClineRecommendedModelIds } from "./cline-recommended-models";
+import { fetchClineProviderModels } from "./cline-provider-models";
+import { fetchClineRecommendedModelsData, type ClineRecommendedModelsData } from "./cline-recommended-models";
 import {
 	addSdkCustomProvider,
 	completeClineDeviceAuth as completeSdkDeviceAuth,
@@ -226,7 +227,16 @@ function toRuntimeProviderModel(model: RuntimeClineProviderModel): RuntimeClineP
 		supportsAttachments: model.supportsAttachments || undefined,
 		supportsReasoningEffort: model.supportsReasoningEffort || undefined,
 		recommendedRank: typeof model.recommendedRank === "number" ? model.recommendedRank : undefined,
+		freeRank: typeof model.freeRank === "number" ? model.freeRank : undefined,
 	};
+}
+
+function resolveClineApiBaseUrl(): string {
+	return getSdkProviderSettings("cline")?.baseUrl?.trim() || DEFAULT_CLINE_API_BASE_URL;
+}
+
+function createModelRankMap(models: readonly { id: string }[]): Map<string, number> {
+	return new Map(models.map((model, index) => [model.id, index] as const));
 }
 
 function createEmptyProviderSettingsSummary(): RuntimeClineProviderSettings {
@@ -788,30 +798,47 @@ export function createClineProviderService() {
 
 		async getProviderModels(providerId: string): Promise<RuntimeClineProviderModelsResponse> {
 			const normalizedProviderId = providerId.trim().toLowerCase();
-			const recommendedModelRanks =
+			const clineApiBaseUrl = resolveClineApiBaseUrl();
+			const featuredModels: ClineRecommendedModelsData =
 				normalizedProviderId === "cline"
-					? new Map(
-							(
-								await fetchClineRecommendedModelIds(
-									getSdkProviderSettings("cline")?.baseUrl?.trim() || DEFAULT_CLINE_API_BASE_URL,
-								)
-							).map((modelId, index) => [modelId, index] as const),
-						)
-					: new Map<string, number>();
-			const providerModels =
+					? await fetchClineRecommendedModelsData(clineApiBaseUrl)
+					: { recommended: [], free: [] };
+			const recommendedModelRanks = createModelRankMap(featuredModels.recommended);
+			const freeModelRanks = createModelRankMap(featuredModels.free);
+			const configuredModel = getSdkProviderSettings(normalizedProviderId)?.model?.trim() ?? "";
+			const rawProviderModels =
 				normalizedProviderId.length > 0
-					? await listSdkProviderModels(normalizedProviderId)
-							.then((sdkModels) =>
-								sdkModels.map((model) =>
-									toRuntimeProviderModel({
-										...model,
-										recommendedRank: recommendedModelRanks.get(model.id),
-									}),
-								),
-							)
-							.then((sdkModels) => sdkModels.sort((left, right) => left.name.localeCompare(right.name)))
-							.catch(() => [])
+					? normalizedProviderId === "cline"
+						? await fetchClineProviderModels(clineApiBaseUrl)
+								.then((models) =>
+									models.length > 0
+										? models
+										: listSdkProviderModels(normalizedProviderId).catch(() => []),
+								)
+								.catch(() => listSdkProviderModels(normalizedProviderId).catch(() => []))
+						: await listSdkProviderModels(normalizedProviderId).catch(() => [])
 					: [];
+			const providerModels = rawProviderModels
+				.map((model) =>
+					toRuntimeProviderModel({
+						...model,
+						recommendedRank: recommendedModelRanks.get(model.id),
+						freeRank: freeModelRanks.get(model.id),
+					}),
+				)
+				.concat(
+					configuredModel.length > 0 && !rawProviderModels.some((model) => model.id === configuredModel)
+						? [
+								toRuntimeProviderModel({
+									id: configuredModel,
+									name: configuredModel,
+									recommendedRank: recommendedModelRanks.get(configuredModel),
+									freeRank: freeModelRanks.get(configuredModel),
+								}),
+							]
+						: [],
+				)
+				.sort((left, right) => left.name.localeCompare(right.name));
 
 			if (providerModels.length > 0) {
 				return {
@@ -820,7 +847,6 @@ export function createClineProviderService() {
 				};
 			}
 
-			const configuredModel = getSdkProviderSettings(normalizedProviderId)?.model?.trim() ?? "";
 			if (configuredModel.length > 0) {
 				return {
 					providerId: normalizedProviderId || providerId,
@@ -829,6 +855,7 @@ export function createClineProviderService() {
 							id: configuredModel,
 							name: configuredModel,
 							recommendedRank: recommendedModelRanks.get(configuredModel),
+							freeRank: freeModelRanks.get(configuredModel),
 						}),
 					],
 				};

@@ -18,7 +18,8 @@ const recommendedModelsSchema = z.object({
 	free: z.array(recommendedModelSchema).default([]),
 });
 
-type RecommendedModelsData = z.infer<typeof recommendedModelsSchema>;
+export type ClineFeaturedModel = z.infer<typeof recommendedModelSchema>;
+export type ClineRecommendedModelsData = z.infer<typeof recommendedModelsSchema>;
 
 const CLINE_RECOMMENDED_MODEL_IDS_FALLBACK = [
 	"google/gemini-3.1-pro-preview",
@@ -26,42 +27,66 @@ const CLINE_RECOMMENDED_MODEL_IDS_FALLBACK = [
 	"anthropic/claude-opus-4.6",
 	"openai/gpt-5.3-codex",
 ] as const;
+const CLINE_FREE_MODEL_IDS_FALLBACK = ["kwaipilot/kat-coder-pro", "arcee-ai/trinity-large-preview:free"] as const;
 
-let inMemoryCache: { apiBaseUrl: string; ids: string[]; timestamp: number } | null = null;
-let pendingRefresh: Promise<string[]> | null = null;
+let inMemoryCache: { apiBaseUrl: string; data: ClineRecommendedModelsData; timestamp: number } | null = null;
+let pendingRefresh: Promise<ClineRecommendedModelsData> | null = null;
 
-function normalizeRecommendedModelIds(input: RecommendedModelsData): string[] {
-	return [...new Set(input.recommended.map((model) => model.id.trim()).filter((id) => id.length > 0))];
+function normalizeFeaturedModels(models: readonly ClineFeaturedModel[]): ClineFeaturedModel[] {
+	const featuredModelsById = new Map<string, ClineFeaturedModel>();
+	for (const model of models) {
+		const id = model.id.trim();
+		if (!id || featuredModelsById.has(id)) {
+			continue;
+		}
+		featuredModelsById.set(id, {
+			id,
+			name: model.name?.trim() || undefined,
+			description: model.description?.trim() || undefined,
+			tags: model.tags?.map((tag) => tag.trim()).filter((tag) => tag.length > 0) ?? undefined,
+		});
+	}
+	return [...featuredModelsById.values()];
+}
+
+function normalizeRecommendedModels(input: ClineRecommendedModelsData): ClineRecommendedModelsData {
+	return {
+		recommended: normalizeFeaturedModels(input.recommended),
+		free: normalizeFeaturedModels(input.free),
+	};
 }
 
 function resolveCacheFilePath(): string {
 	return join(getSdkProviderSettingsDirectory(), CLINE_RECOMMENDED_MODELS_CACHE_FILE);
 }
 
-function getFallbackRecommendedModelIds(): string[] {
-	return [...CLINE_RECOMMENDED_MODEL_IDS_FALLBACK];
+function getFallbackRecommendedModels(): ClineRecommendedModelsData {
+	return {
+		recommended: CLINE_RECOMMENDED_MODEL_IDS_FALLBACK.map((id) => ({ id })),
+		free: CLINE_FREE_MODEL_IDS_FALLBACK.map((id) => ({ id })),
+	};
 }
 
-async function readCachedRecommendedModelIds(): Promise<string[] | null> {
+async function readCachedRecommendedModels(): Promise<ClineRecommendedModelsData | null> {
 	try {
 		const raw = await readFile(resolveCacheFilePath(), "utf8");
 		const parsed = recommendedModelsSchema.safeParse(JSON.parse(raw));
 		if (!parsed.success) {
 			return null;
 		}
-		const ids = normalizeRecommendedModelIds(parsed.data);
-		return ids.length > 0 ? ids : null;
+		const data = normalizeRecommendedModels(parsed.data);
+		return data.recommended.length > 0 || data.free.length > 0 ? data : null;
 	} catch {
 		return null;
 	}
 }
 
-async function writeCachedRecommendedModels(data: RecommendedModelsData): Promise<void> {
+async function writeCachedRecommendedModels(data: ClineRecommendedModelsData): Promise<void> {
 	await mkdir(getSdkProviderSettingsDirectory(), { recursive: true });
 	await writeFile(resolveCacheFilePath(), `${JSON.stringify(data, null, 2)}\n`, "utf8");
 }
 
-async function fetchAndCacheRecommendedModelIds(apiBaseUrl: string): Promise<string[]> {
+async function fetchAndCacheRecommendedModels(apiBaseUrl: string): Promise<ClineRecommendedModelsData> {
 	try {
 		const response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/api/v1/ai/cline/recommended-models`);
 		if (!response.ok) {
@@ -73,28 +98,28 @@ async function fetchAndCacheRecommendedModelIds(apiBaseUrl: string): Promise<str
 			throw new Error("Invalid response body");
 		}
 
-		const ids = normalizeRecommendedModelIds(parsed.data);
-		if (ids.length > 0) {
-			await writeCachedRecommendedModels(parsed.data);
-			return ids;
+		const data = normalizeRecommendedModels(parsed.data);
+		if (data.recommended.length > 0 || data.free.length > 0) {
+			await writeCachedRecommendedModels(data);
+			return data;
 		}
 	} catch {
-		const cachedIds = await readCachedRecommendedModelIds();
-		if (cachedIds && cachedIds.length > 0) {
-			return cachedIds;
+		const cachedData = await readCachedRecommendedModels();
+		if (cachedData && (cachedData.recommended.length > 0 || cachedData.free.length > 0)) {
+			return cachedData;
 		}
 	}
 
-	return getFallbackRecommendedModelIds();
+	return getFallbackRecommendedModels();
 }
 
-export async function fetchClineRecommendedModelIds(apiBaseUrl: string): Promise<string[]> {
+export async function fetchClineRecommendedModelsData(apiBaseUrl: string): Promise<ClineRecommendedModelsData> {
 	if (
 		inMemoryCache &&
 		inMemoryCache.apiBaseUrl === apiBaseUrl &&
 		Date.now() - inMemoryCache.timestamp <= CLINE_RECOMMENDED_MODELS_CACHE_TTL_MS
 	) {
-		return inMemoryCache.ids;
+		return inMemoryCache.data;
 	}
 
 	if (pendingRefresh) {
@@ -103,21 +128,25 @@ export async function fetchClineRecommendedModelIds(apiBaseUrl: string): Promise
 
 	pendingRefresh = (async () => {
 		try {
-			const ids = await fetchAndCacheRecommendedModelIds(apiBaseUrl);
-			if (ids.length > 0) {
+			const data = await fetchAndCacheRecommendedModels(apiBaseUrl);
+			if (data.recommended.length > 0 || data.free.length > 0) {
 				inMemoryCache = {
 					apiBaseUrl,
-					ids,
+					data,
 					timestamp: Date.now(),
 				};
 			}
-			return ids;
+			return data;
 		} finally {
 			pendingRefresh = null;
 		}
 	})();
 
 	return pendingRefresh;
+}
+
+export async function fetchClineRecommendedModelIds(apiBaseUrl: string): Promise<string[]> {
+	return (await fetchClineRecommendedModelsData(apiBaseUrl)).recommended.map((model) => model.id);
 }
 
 export function resetClineRecommendedModelsCacheForTests(): void {

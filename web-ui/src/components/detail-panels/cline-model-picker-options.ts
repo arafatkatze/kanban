@@ -24,6 +24,7 @@ export const CLINE_REASONING_EFFORT_OPTIONS: SearchSelectOption[] = [
 export interface BuildClineAgentModelPickerOptionsResult {
 	options: SearchSelectOption[];
 	recommendedModelIds: string[];
+	freeModelIds: string[];
 	shouldPinSelectedModelToTop: boolean;
 }
 
@@ -39,6 +40,7 @@ export function buildClineAgentModelPickerOptions(
 		return {
 			options: defaultOptions,
 			recommendedModelIds: [],
+			freeModelIds: [],
 			shouldPinSelectedModelToTop: true,
 		};
 	}
@@ -58,11 +60,28 @@ export function buildClineAgentModelPickerOptions(
 		.filter((option): option is SearchSelectOption => option !== undefined);
 	const recommendedModelIds = recommendedOptions.map((option) => option.value);
 	const recommendedModelIdSet = new Set(recommendedModelIds);
-	const nonRecommendedOptions = defaultOptions.filter((option) => !recommendedModelIdSet.has(option.value));
+	const freeOptions = providerModels
+		.filter((model) => typeof model.freeRank === "number" && !recommendedModelIdSet.has(model.id))
+		.sort((left, right) => {
+			const leftRank = left.freeRank ?? Number.MAX_SAFE_INTEGER;
+			const rightRank = right.freeRank ?? Number.MAX_SAFE_INTEGER;
+			if (leftRank !== rightRank) {
+				return leftRank - rightRank;
+			}
+			return left.name.localeCompare(right.name);
+		})
+		.map((model) => optionsById.get(model.id))
+		.filter((option): option is SearchSelectOption => option !== undefined);
+	const freeModelIds = freeOptions.map((option) => option.value);
+	const freeModelIdSet = new Set(freeModelIds);
+	const nonFeaturedOptions = defaultOptions.filter(
+		(option) => !recommendedModelIdSet.has(option.value) && !freeModelIdSet.has(option.value),
+	);
 
 	return {
-		options: [...recommendedOptions, ...nonRecommendedOptions],
+		options: [...recommendedOptions, ...freeOptions, ...nonFeaturedOptions],
 		recommendedModelIds,
+		freeModelIds,
 		shouldPinSelectedModelToTop: false,
 	};
 }

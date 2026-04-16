@@ -13,7 +13,7 @@ import type { RuntimeClineProviderModel } from "@/runtime/types";
 function createModel(
 	id: string,
 	name: string,
-	options: Partial<Pick<RuntimeClineProviderModel, "recommendedRank" | "supportsReasoningEffort">> = {},
+	options: Partial<Pick<RuntimeClineProviderModel, "recommendedRank" | "freeRank" | "supportsReasoningEffort">> = {},
 ): RuntimeClineProviderModel {
 	return { id, name, ...options };
 }
@@ -26,6 +26,8 @@ describe("buildClineAgentModelPickerOptions", () => {
 			createModel("anthropic/claude-opus-4.6", "Claude Opus 4.6", { recommendedRank: 2 }),
 			createModel("anthropic/claude-sonnet-4.6", "Claude Sonnet 4.6", { recommendedRank: 1 }),
 			createModel("openai/gpt-5.3-codex", "GPT-5.3 Codex", { recommendedRank: 4 }),
+			createModel("arcee-ai/trinity-large-preview:free", "Trinity Large Preview", { freeRank: 0 }),
+			createModel("bytedance/seed-2-0-pro", "Seed 2.0 Pro", { freeRank: 1 }),
 			createModel("google/gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview", { recommendedRank: 0 }),
 			createModel("google/gemini-3.1-flash-lite-preview", "Gemini 3.1 Flash Lite Preview"),
 			createModel("xiaomi/mimo-v2-pro", "Mimo v2 Pro"),
@@ -39,6 +41,8 @@ describe("buildClineAgentModelPickerOptions", () => {
 			"anthropic/claude-opus-4.6",
 			"openai/gpt-5.4",
 			"openai/gpt-5.3-codex",
+			"arcee-ai/trinity-large-preview:free",
+			"bytedance/seed-2-0-pro",
 			"openai/gpt-5.2",
 			"google/gemini-3.1-flash-lite-preview",
 			"xiaomi/mimo-v2-pro",
@@ -50,6 +54,7 @@ describe("buildClineAgentModelPickerOptions", () => {
 			"openai/gpt-5.4",
 			"openai/gpt-5.3-codex",
 		]);
+		expect(result.freeModelIds).toEqual(["arcee-ai/trinity-large-preview:free", "bytedance/seed-2-0-pro"]);
 		expect(result.shouldPinSelectedModelToTop).toBe(false);
 	});
 
@@ -63,6 +68,7 @@ describe("buildClineAgentModelPickerOptions", () => {
 
 		expect(result.options.map((option) => option.value)).toEqual(["model-a", "model-b"]);
 		expect(result.recommendedModelIds).toEqual([]);
+		expect(result.freeModelIds).toEqual([]);
 		expect(result.shouldPinSelectedModelToTop).toBe(true);
 	});
 });

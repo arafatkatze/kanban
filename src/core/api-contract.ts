@@ -693,6 +693,7 @@ export const runtimeClineProviderModelSchema = z.object({
 	supportsAttachments: z.boolean().optional(),
 	supportsReasoningEffort: z.boolean().optional(),
 	recommendedRank: z.number().int().nonnegative().optional(),
+	freeRank: z.number().int().nonnegative().optional(),
 });
 export type RuntimeClineProviderModel = z.infer<typeof runtimeClineProviderModelSchema>;
 
