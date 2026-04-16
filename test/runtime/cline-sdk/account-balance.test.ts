@@ -286,6 +286,43 @@ describe("getProviderModels", () => {
 		]);
 	});
 
+	it("does not duplicate a configured model when featured backfill already added it", async () => {
+		setSelectedProviderSettings({
+			provider: "cline",
+			baseUrl: "https://api.cline.bot",
+			model: "bytedance/seed-2-0-pro",
+		});
+		const fetchMock = vi.fn(async (input: string) => {
+			if (input.endsWith("/api/v1/ai/cline/models")) {
+				return {
+					ok: true,
+					json: async () => ({
+						data: [{ id: "anthropic/claude-sonnet-4.6", name: "Claude Sonnet 4.6" }],
+					}),
+				};
+			}
+			return {
+				ok: true,
+				json: async () => ({
+					recommended: [{ id: "anthropic/claude-sonnet-4.6" }],
+					free: [{ id: "bytedance/seed-2-0-pro", name: "seed-2-0-pro" }],
+				}),
+			};
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		const service = createClineProviderService();
+		const result = await service.getProviderModels("cline");
+
+		expect(result.models.filter((model) => model.id === "bytedance/seed-2-0-pro")).toEqual([
+			{
+				id: "bytedance/seed-2-0-pro",
+				name: "seed-2-0-pro",
+				freeRank: 0,
+			},
+		]);
+	});
+
 	it("falls back to the bundled recommended model IDs when the endpoint fails", async () => {
 		setSelectedProviderSettings({
 			provider: "cline",

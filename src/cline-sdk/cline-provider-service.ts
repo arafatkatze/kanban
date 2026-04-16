@@ -254,6 +254,16 @@ function createFeaturedModelFallbacks(
 		}));
 }
 
+function dedupeProviderModelsById<T extends { id: string }>(models: readonly T[]): T[] {
+	const dedupedModels = new Map<string, T>();
+	for (const model of models) {
+		if (!dedupedModels.has(model.id)) {
+			dedupedModels.set(model.id, model);
+		}
+	}
+	return [...dedupedModels.values()];
+}
+
 function createEmptyProviderSettingsSummary(): RuntimeClineProviderSettings {
 	return {
 		providerId: null,
@@ -838,8 +848,8 @@ export function createClineProviderService() {
 				normalizedProviderId === "cline" && featuredModelsResult.source !== "fallback"
 					? createFeaturedModelFallbacks(featuredModels, rawProviderModels)
 					: [];
-			const providerModels = rawProviderModels
-				.concat(featuredModelFallbacks)
+			const resolvedProviderModels = dedupeProviderModelsById(rawProviderModels.concat(featuredModelFallbacks));
+			const providerModels = resolvedProviderModels
 				.map((model) =>
 					toRuntimeProviderModel({
 						...model,
@@ -848,7 +858,7 @@ export function createClineProviderService() {
 					}),
 				)
 				.concat(
-					configuredModel.length > 0 && !rawProviderModels.some((model) => model.id === configuredModel)
+					configuredModel.length > 0 && !resolvedProviderModels.some((model) => model.id === configuredModel)
 						? [
 								toRuntimeProviderModel({
 									id: configuredModel,
