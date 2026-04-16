@@ -21,6 +21,7 @@ import type {
 	RuntimeClineReasoningEffort,
 } from "../core/api-contract";
 import { openInBrowser } from "../server/browser";
+import { fetchClineRecommendedModelIds } from "./cline-recommended-models";
 import {
 	addSdkCustomProvider,
 	completeClineDeviceAuth as completeSdkDeviceAuth,
@@ -224,6 +225,7 @@ function toRuntimeProviderModel(model: RuntimeClineProviderModel): RuntimeClineP
 		supportsVision: model.supportsVision || undefined,
 		supportsAttachments: model.supportsAttachments || undefined,
 		supportsReasoningEffort: model.supportsReasoningEffort || undefined,
+		recommendedRank: typeof model.recommendedRank === "number" ? model.recommendedRank : undefined,
 	};
 }
 
@@ -786,10 +788,27 @@ export function createClineProviderService() {
 
 		async getProviderModels(providerId: string): Promise<RuntimeClineProviderModelsResponse> {
 			const normalizedProviderId = providerId.trim().toLowerCase();
+			const recommendedModelRanks =
+				normalizedProviderId === "cline"
+					? new Map(
+							(
+								await fetchClineRecommendedModelIds(
+									getSdkProviderSettings("cline")?.baseUrl?.trim() || DEFAULT_CLINE_API_BASE_URL,
+								)
+							).map((modelId, index) => [modelId, index] as const),
+						)
+					: new Map<string, number>();
 			const providerModels =
 				normalizedProviderId.length > 0
 					? await listSdkProviderModels(normalizedProviderId)
-							.then((sdkModels) => sdkModels.map((model) => toRuntimeProviderModel(model)))
+							.then((sdkModels) =>
+								sdkModels.map((model) =>
+									toRuntimeProviderModel({
+										...model,
+										recommendedRank: recommendedModelRanks.get(model.id),
+									}),
+								),
+							)
 							.then((sdkModels) => sdkModels.sort((left, right) => left.name.localeCompare(right.name)))
 							.catch(() => [])
 					: [];
@@ -805,7 +824,13 @@ export function createClineProviderService() {
 			if (configuredModel.length > 0) {
 				return {
 					providerId: normalizedProviderId || providerId,
-					models: [{ id: configuredModel, name: configuredModel }],
+					models: [
+						toRuntimeProviderModel({
+							id: configuredModel,
+							name: configuredModel,
+							recommendedRank: recommendedModelRanks.get(configuredModel),
+						}),
+					],
 				};
 			}
 
