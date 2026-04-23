@@ -137,14 +137,15 @@ export function ClineSetupSection({
 			) ?? null,
 		[controller.normalizedProviderId, controller.providerCatalog],
 	);
-	const savedApiKeyMask = "••••••••••••••••";
-	const apiKeyPlaceholder = controller.apiKeyConfigured ? "" : "Enter API key";
-	const shouldShowSavedApiKeyMask =
-		controller.apiKeyConfigured && controller.apiKey.length === 0 && !isApiKeyFieldFocused;
 	const providerEnvHint = (selectedProvider?.env ?? [])
 		.map((value) => value.trim())
 		.filter((value) => value.length > 0)
 		.join(", ");
+	const savedApiKeyMask = "••••••••••••••••";
+	const apiKeyPlaceholder = "";
+	const selectedProviderHasSavedApiKey = selectedProvider?.apiKeyConfigured === true;
+	const shouldShowSavedApiKeyMask =
+		selectedProviderHasSavedApiKey && controller.apiKey.length === 0 && !isApiKeyFieldFocused;
 	const shouldShowBaseUrlField =
 		!controller.isOauthProviderSelected &&
 		(selectedProvider?.supportsBaseUrl ?? controller.baseUrl.trim().length > 0);
