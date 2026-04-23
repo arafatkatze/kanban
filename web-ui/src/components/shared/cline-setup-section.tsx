@@ -151,6 +151,10 @@ export function ClineSetupSection({
 		[clineProviderOptions, controller.providerId],
 	);
 	const canEditSelectedProvider = controller.providerId.trim().length > 0 && !controller.isOauthProviderSelected;
+	// Built-ins shipped by @clinebot/llms only expose a subset of editable
+	// fields (apiKey, baseUrl, headers, timeout, defaultModelId). User-added
+	// custom providers get the full OpenAI-compatible editor.
+	const isEditingBuiltInProvider = selectedProvider !== null && !selectedProvider.isCustom;
 	const selectedProviderEditInitialValues = useMemo((): ClineProviderDialogInitialValues | null => {
 		if (!canEditSelectedProvider) {
 			return null;
@@ -889,6 +893,7 @@ export function ClineSetupSection({
 				existingProviderIds={controller.providerCatalog.map((provider) => provider.id)}
 				mode={providerDialogMode}
 				initialValues={providerDialogMode === "edit" ? selectedProviderEditInitialValues : null}
+				isBuiltInProvider={providerDialogMode === "edit" && isEditingBuiltInProvider}
 				onSubmit={async (input) => {
 					onError?.(null);
 					const result =

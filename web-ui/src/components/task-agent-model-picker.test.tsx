@@ -31,7 +31,16 @@ function createProvider(
 	enabled: boolean,
 	defaultModelId: string | null = null,
 ): RuntimeClineProviderCatalogItem {
-	return { id, name, oauthSupported: false, enabled, defaultModelId, baseUrl: null, supportsBaseUrl: false };
+	return {
+		id,
+		name,
+		oauthSupported: false,
+		enabled,
+		defaultModelId,
+		baseUrl: null,
+		supportsBaseUrl: false,
+		isCustom: false,
+	};
 }
 
 function createTaskClineSettings(settings?: RuntimeTaskClineSettings): RuntimeTaskClineSettings | undefined {
