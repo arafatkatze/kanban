@@ -16,6 +16,7 @@ import {
 	installGracefulShutdownHandlers,
 	shouldSuppressImmediateDuplicateShutdownSignals,
 } from "./core/graceful-shutdown";
+import { assertSupportedNodeVersion, UnsupportedNodeVersionError } from "./core/node-version.js";
 import {
 	buildKanbanRuntimeUrl,
 	clearKanbanRuntimeTls,
@@ -692,6 +693,11 @@ function createProgram(invocationArgs: string[]): Command {
 }
 
 async function run(): Promise<void> {
+	// Fail fast on unsupported Node.js runtimes before touching the SDK.
+	// Kanban's session store depends on `node:sqlite`, added in Node 22.5;
+	// older runtimes otherwise crash with a confusing chained
+	// `ERR_UNKNOWN_BUILTIN_MODULE` / `ECOMPROMISED` error. See cline/kanban#357.
+	assertSupportedNodeVersion();
 	const argv = process.argv.slice(2);
 	const program = createProgram(argv);
 	await program.parseAsync(argv, { from: "user" });
@@ -702,6 +708,14 @@ async function run(): Promise<void> {
 }
 
 void run().catch(async (error) => {
+	// Unsupported Node.js runtime: print the helpful message verbatim and
+	// skip the "Failed to start Kanban:" prefix / Sentry capture so the
+	// output stays readable. See cline/kanban#357.
+	if (error instanceof UnsupportedNodeVersionError) {
+		process.stderr.write(`${error.message}\n`);
+		await Promise.allSettled([disposeCliTelemetryService(), flushNodeTelemetry()]);
+		process.exit(1);
+	}
 	captureNodeException(error, { area: "startup" });
 	await Promise.allSettled([disposeCliTelemetryService(), flushNodeTelemetry()]);
 	const message = error instanceof Error ? error.message : String(error);
