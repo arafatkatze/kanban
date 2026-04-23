@@ -42,7 +42,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22.5"
   },
   "scripts": {
     "clean": "shx rm -rf dist coverage",
