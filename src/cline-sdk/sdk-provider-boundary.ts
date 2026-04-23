@@ -343,6 +343,16 @@ async function writeModelsRegistry(state: LocalModelsFile): Promise<void> {
 	await writeFile(resolveModelsPath(), `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
 
+// Returns the providerIds that the user has added via the custom provider
+// flow (stored in the local models.json next to provider-settings.json).
+// Built-in providers from @clinebot/llms are not included. Used to tell
+// apart SDK-owned built-ins from user-added custom providers when updating
+// settings (see cline-provider-service.updateCustomProvider).
+export async function listSdkCustomProviderIds(): Promise<string[]> {
+	const state = await readModelsRegistry();
+	return Object.keys(state.providers);
+}
+
 export async function addSdkCustomProvider(input: AddSdkCustomProviderInput): Promise<void> {
 	await addLocalProvider(providerManager, {
 		providerId: input.providerId,
