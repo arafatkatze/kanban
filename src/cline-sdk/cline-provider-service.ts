@@ -33,6 +33,7 @@ import {
 	fetchSdkOrgData,
 	getLastUsedSdkProviderSettings,
 	getSdkProviderSettings,
+	listSdkCustomProviderIds,
 	listSdkProviderCatalog,
 	listSdkProviderModels,
 	loginManagedOauthProvider,
@@ -371,6 +372,75 @@ async function refreshManagedOauthSettings(
 		settings: nextSettings,
 		apiKey: toProviderApiKey(providerId, nextCredentials.access),
 	};
+}
+
+// Apply the editable subset of ProviderSettings for a built-in provider
+// (apiKey, baseUrl, headers, timeout, defaultModelId -> settings.model).
+// The SDK-owned fields on the catalog entry (name, models list,
+// modelsSourceUrl, capabilities) are intentionally ignored here because they
+// are managed by @clinebot/llms and cannot be mutated from Kanban without
+// turning the built-in into a local-registry custom provider.
+function updateBuiltInProviderSettings(
+	providerId: string,
+	input: UpdateCustomClineProviderInput,
+): RuntimeClineProviderSettings {
+	const existingSettings = getSdkProviderSettings(providerId) ?? { provider: providerId };
+	const nextSettings: SdkProviderSettings = {
+		...existingSettings,
+		provider: providerId,
+	};
+
+	if (input.baseUrl !== undefined) {
+		const baseUrl = input.baseUrl.trim();
+		if (baseUrl) {
+			nextSettings.baseUrl = baseUrl;
+		} else {
+			delete nextSettings.baseUrl;
+		}
+	}
+
+	if (input.apiKey !== undefined) {
+		const apiKey = input.apiKey?.trim() ?? "";
+		if (apiKey) {
+			nextSettings.apiKey = apiKey;
+		} else {
+			delete nextSettings.apiKey;
+		}
+	}
+
+	if (input.headers !== undefined) {
+		if (input.headers && Object.keys(input.headers).length > 0) {
+			nextSettings.headers = input.headers;
+		} else {
+			delete nextSettings.headers;
+		}
+	}
+
+	if (input.timeoutMs !== undefined) {
+		if (typeof input.timeoutMs === "number" && input.timeoutMs > 0) {
+			nextSettings.timeout = input.timeoutMs;
+		} else {
+			delete nextSettings.timeout;
+		}
+	}
+
+	if (input.defaultModelId !== undefined) {
+		const modelId = input.defaultModelId?.trim() ?? "";
+		if (modelId) {
+			nextSettings.model = modelId;
+		} else {
+			delete nextSettings.model;
+		}
+	}
+
+	const isLastUsed = getLastUsedSdkProviderSettings()?.provider?.trim().toLowerCase() === providerId;
+	saveSdkProviderSettings({
+		settings: nextSettings,
+		tokenSource: hasOauthAccessToken(nextSettings) ? "oauth" : "manual",
+		setLastUsed: isLastUsed,
+	});
+
+	return toProviderSettingsSummary(getSdkProviderSettings(providerId));
 }
 
 export function createClineProviderService() {
@@ -740,6 +810,9 @@ export function createClineProviderService() {
 
 		async getProviderCatalog(): Promise<RuntimeClineProviderCatalogResponse> {
 			const selectedProviderId = getProviderSettingsSummary().providerId?.trim().toLowerCase() ?? "";
+			const customProviderIds = new Set(
+				(await listSdkCustomProviderIds().catch(() => [])).map((id) => id.trim().toLowerCase()),
+			);
 			const providers: RuntimeClineProviderCatalogItem[] = await listSdkProviderCatalog()
 				.then((sdkProviders) =>
 					sdkProviders
@@ -753,6 +826,7 @@ export function createClineProviderService() {
 							baseUrl: provider.baseUrl?.trim() || null,
 							supportsBaseUrl: (provider.baseUrl?.trim().length ?? 0) > 0,
 							env: provider.env,
+							isCustom: customProviderIds.has(provider.id.trim().toLowerCase()),
 						}))
 						.sort((left, right) => {
 							if (left.id === "cline") {
@@ -776,6 +850,7 @@ export function createClineProviderService() {
 					baseUrl: getProviderSettingsSummary().baseUrl,
 					supportsBaseUrl: (getProviderSettingsSummary().baseUrl?.trim().length ?? 0) > 0,
 					env: undefined,
+					isCustom: customProviderIds.has(selectedProviderId),
 				});
 			}
 
@@ -849,6 +924,21 @@ export function createClineProviderService() {
 			const providerId = input.providerId.trim().toLowerCase();
 			if (!providerId) {
 				throw new Error("Provider ID cannot be empty.");
+			}
+
+			// Built-in providers (shipped by @clinebot/llms) do not live in the
+			// local models.json custom-provider registry. Calling the SDK's
+			// updateLocalProvider against them throws `provider "<id>" does not
+			// exist`, which is what was surfacing from the settings Edit dialog
+			// (issue #293). For built-ins we only persist the editable subset of
+			// ProviderSettings (apiKey, baseUrl, headers, timeout, defaultModel
+			// -> settings.model) and leave the SDK-owned catalog fields (name,
+			// models, modelsSourceUrl, capabilities) untouched.
+			const customProviderIds = await listSdkCustomProviderIds().catch(() => []);
+			const isCustomProvider = customProviderIds.map((id) => id.trim().toLowerCase()).includes(providerId);
+
+			if (!isCustomProvider) {
+				return updateBuiltInProviderSettings(providerId, input);
 			}
 
 			await updateSdkCustomProvider({

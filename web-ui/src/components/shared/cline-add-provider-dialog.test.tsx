@@ -200,4 +200,102 @@ describe("ClineAddProviderDialog", () => {
 			}),
 		);
 	});
+
+	// Regression for issue #293: editing a built-in provider from the Cline
+	// settings Edit dialog must only submit the editable subset (apiKey,
+	// baseUrl, headers, timeoutMs, defaultModelId). Fields owned by the SDK
+	// catalog (name, models, capabilities, modelsSourceUrl) must not be sent —
+	// those would otherwise drive the backend into the SDK's updateLocalProvider
+	// path, which throws `provider "<id>" does not exist` for built-ins.
+	it("submits only the editable subset when editing a built-in provider", async () => {
+		const onSubmit = vi.fn(async () => ({ ok: true }));
+
+		await act(async () => {
+			root.render(
+				<ClineAddProviderDialog
+					open={true}
+					onOpenChange={() => {}}
+					existingProviderIds={["ollama"]}
+					mode="edit"
+					isBuiltInProvider={true}
+					initialValues={{
+						providerId: "ollama",
+						name: "Ollama",
+						baseUrl: "http://localhost:11434",
+						models: ["llama3.1"],
+						defaultModelId: "llama3.1",
+					}}
+					onSubmit={onSubmit}
+				/>,
+			);
+		});
+
+		// The title should read "Edit provider" (no "OpenAI-compatible" suffix
+		// for built-ins) so users don't get confused when editing ollama etc.
+		expect(document.body.textContent).toContain("Edit provider");
+		expect(document.body.textContent).not.toContain("Edit OpenAI-compatible provider");
+		expect(document.body.textContent).toContain("This is a built-in provider");
+
+		// SDK-owned fields are disabled so the user cannot edit them.
+		const inputs = Array.from(document.body.querySelectorAll("input"));
+		const providerNameInput = inputs.find((input) => input.placeholder === "My Provider") as
+			| HTMLInputElement
+			| undefined;
+		const modelsSourceUrlInput = inputs.find((input) => input.placeholder === "https://api.example.com/v1/models") as
+			| HTMLInputElement
+			| undefined;
+		expect(providerNameInput?.disabled).toBe(true);
+		expect(modelsSourceUrlInput?.disabled).toBe(true);
+
+		const visionButton = findButtonByText(document.body, "vision");
+		expect(visionButton?.disabled).toBe(true);
+
+		// There must be no free-form model-chip input — the built-in's list is
+		// owned by the SDK catalog.
+		const modelInput = inputs.find((input) => input.placeholder === "Type a model ID and press Enter");
+		expect(modelInput).toBeUndefined();
+
+		// User changes the base URL and API key.
+		const baseUrlInput = inputs.find((input) => input.placeholder === "https://api.example.com/v1") as
+			| HTMLInputElement
+			| undefined;
+		const apiKeyInput = inputs.find((input) => input.placeholder === "Optional") as HTMLInputElement | undefined;
+		expect(baseUrlInput).toBeDefined();
+		expect(apiKeyInput).toBeDefined();
+
+		await act(async () => {
+			if (!baseUrlInput || !apiKeyInput) {
+				return;
+			}
+			setInputValue(baseUrlInput, "http://localhost:11500");
+			setInputValue(apiKeyInput, "new-ollama-token");
+		});
+
+		const saveButton = findButtonByText(document.body, "Update provider");
+		expect(saveButton).toBeInstanceOf(HTMLButtonElement);
+		expect(saveButton?.disabled).toBe(false);
+
+		await act(async () => {
+			saveButton?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+			saveButton?.click();
+		});
+
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+		const submitCalls = onSubmit.mock.calls as unknown as Array<[Record<string, unknown>]>;
+		const firstCall = submitCalls[0];
+		if (!firstCall) {
+			throw new Error("Expected onSubmit to have been called.");
+		}
+		const payload = firstCall[0];
+		expect(payload).toEqual({
+			providerId: "ollama",
+			baseUrl: "http://localhost:11500",
+			apiKey: "new-ollama-token",
+		});
+		// Explicitly assert none of the SDK-owned fields leak into the payload.
+		expect(payload).not.toHaveProperty("name");
+		expect(payload).not.toHaveProperty("models");
+		expect(payload).not.toHaveProperty("modelsSourceUrl");
+		expect(payload).not.toHaveProperty("capabilities");
+	});
 });
