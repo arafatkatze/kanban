@@ -16,6 +16,7 @@ import {
 	installGracefulShutdownHandlers,
 	shouldSuppressImmediateDuplicateShutdownSignals,
 } from "./core/graceful-shutdown";
+import { checkNodeVersion, formatNodeVersionError } from "./core/node-version";
 import {
 	buildKanbanRuntimeUrl,
 	clearKanbanRuntimeTls,
@@ -691,7 +692,17 @@ function createProgram(invocationArgs: string[]): Command {
 	return program;
 }
 
+function enforceMinimumNodeVersion(): void {
+	const result = checkNodeVersion(process.version);
+	if (result.ok) {
+		return;
+	}
+	console.error(formatNodeVersionError(result));
+	process.exit(1);
+}
+
 async function run(): Promise<void> {
+	enforceMinimumNodeVersion();
 	const argv = process.argv.slice(2);
 	const program = createProgram(argv);
 	await program.parseAsync(argv, { from: "user" });

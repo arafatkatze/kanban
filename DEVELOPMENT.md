@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Node.js 20+
+- Node.js 22.5+ (the Cline SDK depends on the built-in `node:sqlite` module, introduced in 22.5.0)
 - npm 10+
 
 ## Install
