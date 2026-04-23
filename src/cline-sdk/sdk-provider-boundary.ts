@@ -36,6 +36,7 @@ import {
 	startClineDeviceAuth as sdkStartClineDeviceAuth,
 	type Tool,
 } from "@clinebot/core";
+import { discoverLiteLlmModelIds, mergeLiteLlmModels } from "./litellm-model-discovery";
 
 export type ManagedClineOauthProviderId = "cline" | "oca" | "openai-codex";
 export type SdkReasoningEffort = NonNullable<NonNullable<ProviderSettings["reasoning"]>["effort"]>;
@@ -311,13 +312,33 @@ export async function listSdkProviderCatalog(): Promise<SdkProviderCatalogItem[]
 export async function listSdkProviderModels(providerId: string): Promise<SdkProviderModel[]> {
 	const config = providerManager.getProviderConfig(providerId);
 	const response = await getLocalProviderModels(providerId, config);
-	return response.models.map((model: Awaited<typeof response>["models"][number]) => ({
+	const sdkModels: SdkProviderModel[] = response.models.map((model: Awaited<typeof response>["models"][number]) => ({
 		id: model.id,
 		name: model.name,
 		supportsVision: model.supportsVision,
 		supportsAttachments: model.supportsAttachments,
 		supportsReasoningEffort: model.supportsReasoning,
 	}));
+
+	// LiteLLM's admin-only `/v1/model/info` endpoint (used inside the SDK) is
+	// blocked for virtual keys, which collapses the picker down to a single
+	// hard-coded default (issue #270). Supplement with the OpenAI-compatible
+	// `/v1/models` endpoint which respects the caller's allow-list.
+	if (providerId.trim().toLowerCase() === "litellm") {
+		const settings = providerManager.getProviderSettings(providerId);
+		const apiKey = settings?.apiKey?.trim() || settings?.auth?.apiKey?.trim() || "";
+		if (apiKey) {
+			const discoveredIds = await discoverLiteLlmModelIds({
+				baseUrl: settings?.baseUrl ?? null,
+				apiKey,
+			}).catch(() => [] as string[]);
+			if (discoveredIds.length > 0) {
+				return mergeLiteLlmModels(sdkModels, discoveredIds);
+			}
+		}
+	}
+
+	return sdkModels;
 }
 
 const providerManager = new ProviderSettingsManager();
