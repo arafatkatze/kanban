@@ -673,6 +673,13 @@ export const runtimeClineProviderCatalogItemSchema = z.object({
 	baseUrl: z.string().nullable(),
 	supportsBaseUrl: z.boolean(),
 	env: z.array(z.string()).optional(),
+	// True when this provider was added by the user via "Add OpenAI-compatible
+	// provider" (lives in the local models.json registry). False for built-ins
+	// shipped by @clinebot/llms. Used by the UI so it can adjust the Edit
+	// dialog (built-ins only expose a subset of editable fields like apiKey,
+	// baseUrl, headers, timeoutMs, defaultModelId) and by the backend to route
+	// updates to either the SDK custom-provider path or plain settings save.
+	isCustom: z.boolean(),
 });
 export type RuntimeClineProviderCatalogItem = z.infer<typeof runtimeClineProviderCatalogItemSchema>;
 

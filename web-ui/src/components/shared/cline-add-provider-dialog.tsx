@@ -92,6 +92,7 @@ export function ClineAddProviderDialog({
 	existingProviderIds,
 	mode = "add",
 	initialValues = null,
+	isBuiltInProvider = false,
 	onSubmit,
 }: {
 	open: boolean;
@@ -99,8 +100,15 @@ export function ClineAddProviderDialog({
 	existingProviderIds: string[];
 	mode?: ClineProviderDialogMode;
 	initialValues?: ClineProviderDialogInitialValues | null;
+	// True when editing a provider shipped by @clinebot/llms (e.g. ollama,
+	// openai, openrouter) rather than a user-added custom provider. Built-ins
+	// only expose the editable subset (apiKey, baseUrl, headers, timeout,
+	// defaultModelId); SDK-owned fields (name, models list, modelsSourceUrl,
+	// capabilities) render as read-only context.
+	isBuiltInProvider?: boolean;
 	onSubmit: (input: AddClineProviderInput | UpdateClineProviderInput) => Promise<SaveResult>;
 }): ReactElement {
+	const isEditingBuiltIn = mode === "edit" && isBuiltInProvider;
 	const initialForm = useMemo(() => createInitialFormState(initialValues), [initialValues]);
 	const [form, setForm] = useState<FormState>(() => initialForm);
 	const [modelInput, setModelInput] = useState("");
@@ -152,6 +160,18 @@ export function ClineAddProviderDialog({
 				.map((entry) => [entry.key.trim(), entry.value.trim()] as const)
 				.filter(([key]) => key.length > 0),
 		);
+		if (isEditingBuiltIn) {
+			// Built-in providers only expose the editable subset; ignore changes
+			// to SDK-owned fields (name, models list, modelsSourceUrl,
+			// capabilities) when deciding whether the form is dirty.
+			return (
+				form.baseUrl.trim() !== initialForm.baseUrl.trim() ||
+				form.defaultModelId.trim() !== initialForm.defaultModelId.trim() ||
+				form.timeoutMs.trim() !== initialForm.timeoutMs.trim() ||
+				JSON.stringify(normalizedHeaders) !== JSON.stringify(initialHeaders) ||
+				form.apiKey.trim().length > 0
+			);
+		}
 		return (
 			form.name.trim() !== initialForm.name.trim() ||
 			form.baseUrl.trim() !== initialForm.baseUrl.trim() ||
@@ -174,12 +194,15 @@ export function ClineAddProviderDialog({
 		form.name,
 		form.timeoutMs,
 		initialForm,
+		isEditingBuiltIn,
 	]);
 	const canSubmit =
 		normalizedProviderId.length > 0 &&
 		form.name.trim().length > 0 &&
 		form.baseUrl.trim().length > 0 &&
-		(hasManualModels || hasModelsSource) &&
+		// Built-ins manage their own model list via the SDK catalog, so we do
+		// not require the user to re-enter models when editing them.
+		(isEditingBuiltIn || hasManualModels || hasModelsSource) &&
 		!duplicateProviderId &&
 		(form.timeoutMs.trim().length === 0 ||
 			(Number.isInteger(Number(form.timeoutMs)) && Number(form.timeoutMs) > 0)) &&
@@ -251,39 +274,52 @@ export function ClineAddProviderDialog({
 		const nextTimeoutMs = form.timeoutMs.trim().length > 0 ? Number(form.timeoutMs) : undefined;
 		const nextDefaultModelId = form.defaultModelId.trim() || draftModels[0] || null;
 		const nextModelsSourceUrl = form.modelsSourceUrl.trim() || null;
+		const initialHeadersSerialized = JSON.stringify(
+			Object.fromEntries(
+				initialForm.headers
+					.map((entry) => [entry.key.trim(), entry.value.trim()] as const)
+					.filter(([key]) => key.length > 0),
+			),
+		);
+		const editPayload = isEditingBuiltIn
+			? // Built-ins get only the editable subset. Do not send name / models /
+				// modelsSourceUrl / capabilities — those are SDK-owned and the
+				// backend would otherwise overwrite them.
+				({
+					providerId: normalizedProviderId,
+					...(form.baseUrl.trim() !== initialForm.baseUrl.trim() ? { baseUrl: form.baseUrl.trim() } : {}),
+					...(form.apiKey.trim().length > 0 ? { apiKey: form.apiKey.trim() } : {}),
+					...(JSON.stringify(normalizedHeaders) !== initialHeadersSerialized
+						? { headers: normalizedHeaders }
+						: {}),
+					...(form.timeoutMs.trim() !== initialForm.timeoutMs.trim() ? { timeoutMs: nextTimeoutMs ?? null } : {}),
+					...(nextDefaultModelId !== (initialForm.defaultModelId.trim() || initialForm.models[0] || null)
+						? { defaultModelId: nextDefaultModelId }
+						: {}),
+				} satisfies UpdateClineProviderInput)
+			: ({
+					providerId: normalizedProviderId,
+					...(form.name.trim() !== initialForm.name.trim() ? { name: form.name.trim() } : {}),
+					...(form.baseUrl.trim() !== initialForm.baseUrl.trim() ? { baseUrl: form.baseUrl.trim() } : {}),
+					...(form.apiKey.trim().length > 0 ? { apiKey: form.apiKey.trim() } : {}),
+					...(JSON.stringify(normalizedHeaders) !== initialHeadersSerialized
+						? { headers: normalizedHeaders }
+						: {}),
+					...(form.timeoutMs.trim() !== initialForm.timeoutMs.trim() ? { timeoutMs: nextTimeoutMs ?? null } : {}),
+					...(JSON.stringify(draftModels) !== JSON.stringify(initialForm.models) ? { models: draftModels } : {}),
+					...(nextDefaultModelId !== (initialForm.defaultModelId.trim() || initialForm.models[0] || null)
+						? { defaultModelId: nextDefaultModelId }
+						: {}),
+					...(nextModelsSourceUrl !== (initialForm.modelsSourceUrl.trim() || null)
+						? { modelsSourceUrl: nextModelsSourceUrl }
+						: {}),
+					...(JSON.stringify(form.capabilities) !== JSON.stringify(initialForm.capabilities)
+						? { capabilities: form.capabilities.length > 0 ? form.capabilities : [] }
+						: {}),
+				} satisfies UpdateClineProviderInput);
 		const payload =
 			mode === "edit"
-				? ({
-						providerId: normalizedProviderId,
-						...(form.name.trim() !== initialForm.name.trim() ? { name: form.name.trim() } : {}),
-						...(form.baseUrl.trim() !== initialForm.baseUrl.trim() ? { baseUrl: form.baseUrl.trim() } : {}),
-						...(form.apiKey.trim().length > 0 ? { apiKey: form.apiKey.trim() } : {}),
-						...(JSON.stringify(normalizedHeaders) !==
-						JSON.stringify(
-							Object.fromEntries(
-								initialForm.headers
-									.map((entry) => [entry.key.trim(), entry.value.trim()] as const)
-									.filter(([key]) => key.length > 0),
-							),
-						)
-							? { headers: normalizedHeaders }
-							: {}),
-						...(form.timeoutMs.trim() !== initialForm.timeoutMs.trim()
-							? { timeoutMs: nextTimeoutMs ?? null }
-							: {}),
-						...(JSON.stringify(draftModels) !== JSON.stringify(initialForm.models)
-							? { models: draftModels }
-							: {}),
-						...(nextDefaultModelId !== (initialForm.defaultModelId.trim() || initialForm.models[0] || null)
-							? { defaultModelId: nextDefaultModelId }
-							: {}),
-						...(nextModelsSourceUrl !== (initialForm.modelsSourceUrl.trim() || null)
-							? { modelsSourceUrl: nextModelsSourceUrl }
-							: {}),
-						...(JSON.stringify(form.capabilities) !== JSON.stringify(initialForm.capabilities)
-							? { capabilities: form.capabilities.length > 0 ? form.capabilities : [] }
-							: {}),
-					} satisfies UpdateClineProviderInput)
+				? editPayload
 				: ({
 						providerId: normalizedProviderId,
 						name: form.name.trim(),
@@ -307,8 +343,22 @@ export function ClineAddProviderDialog({
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange} contentClassName="max-w-3xl">
-			<DialogHeader title={mode === "edit" ? "Edit OpenAI-compatible provider" : "Add OpenAI-compatible provider"} />
+			<DialogHeader
+				title={
+					mode === "edit"
+						? isEditingBuiltIn
+							? "Edit provider"
+							: "Edit OpenAI-compatible provider"
+						: "Add OpenAI-compatible provider"
+				}
+			/>
 			<DialogBody className="space-y-4">
+				{isEditingBuiltIn ? (
+					<p className="rounded-md border border-border bg-surface-1 px-3 py-2 text-[12px] text-text-secondary">
+						This is a built-in provider. Name, models, and capabilities are managed by the Cline SDK — you can
+						only edit the API key, base URL, headers, timeout, and default model.
+					</p>
+				) : null}
 				<section className="rounded-lg border border-border bg-surface-1 p-3">
 					<div className="grid gap-3 md:grid-cols-2">
 						<div className="min-w-0">
@@ -335,7 +385,8 @@ export function ClineAddProviderDialog({
 								value={form.name}
 								onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
 								placeholder="My Provider"
-								className="h-8 w-full rounded-md border border-border bg-surface-2 px-2 text-[13px] text-text-primary placeholder:text-text-tertiary focus:border-border-focus focus:outline-none"
+								disabled={isEditingBuiltIn}
+								className="h-8 w-full rounded-md border border-border bg-surface-2 px-2 text-[13px] text-text-primary placeholder:text-text-tertiary focus:border-border-focus focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
 							/>
 						</div>
 					</div>
@@ -378,7 +429,8 @@ export function ClineAddProviderDialog({
 						value={form.modelsSourceUrl}
 						onChange={(event) => setForm((current) => ({ ...current, modelsSourceUrl: event.target.value }))}
 						placeholder="https://api.example.com/v1/models"
-						className="h-8 w-full rounded-md border border-border bg-surface-2 px-2 text-[13px] text-text-primary placeholder:text-text-tertiary focus:border-border-focus focus:outline-none"
+						disabled={isEditingBuiltIn}
+						className="h-8 w-full rounded-md border border-border bg-surface-2 px-2 text-[13px] text-text-primary placeholder:text-text-tertiary focus:border-border-focus focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
 					/>
 					<p className="mt-1 text-[12px] text-text-tertiary">
 						Optional. If set, the SDK can fetch models from a compatible `/models` endpoint.
@@ -387,38 +439,51 @@ export function ClineAddProviderDialog({
 
 				<section className="rounded-lg border border-border bg-surface-1 p-3">
 					<p className="mb-1 text-[12px] text-text-secondary">Models</p>
-					<div className="flex min-h-10 flex-wrap gap-1 rounded-md border border-border bg-surface-2 px-2 py-1.5">
+					<div
+						className={cn(
+							"flex min-h-10 flex-wrap gap-1 rounded-md border border-border bg-surface-2 px-2 py-1.5",
+							isEditingBuiltIn && "opacity-60",
+						)}
+					>
 						{form.models.map((model) => (
 							<span
 								key={model}
 								className="inline-flex items-center gap-1 rounded-md bg-surface-3 px-2 py-1 text-[12px] text-text-primary"
 							>
 								<span className="font-mono">{model}</span>
-								<button
-									type="button"
-									className="text-text-secondary hover:text-text-primary"
-									onClick={() => removeModel(model)}
-									aria-label={`Remove ${model}`}
-								>
-									<X size={12} />
-								</button>
+								{isEditingBuiltIn ? null : (
+									<button
+										type="button"
+										className="text-text-secondary hover:text-text-primary"
+										onClick={() => removeModel(model)}
+										aria-label={`Remove ${model}`}
+									>
+										<X size={12} />
+									</button>
+								)}
 							</span>
 						))}
-						<input
-							value={modelInput}
-							onChange={(event) => setModelInput(event.target.value)}
-							onKeyDown={handleModelKeyDown}
-							onBlur={() => {
-								if (normalizedPendingModel) {
-									addModel(normalizedPendingModel);
-									setModelInput("");
-								}
-							}}
-							placeholder={form.models.length === 0 ? "Type a model ID and press Enter" : ""}
-							className="min-w-40 flex-1 bg-transparent text-[13px] text-text-primary placeholder:text-text-tertiary focus:outline-none"
-						/>
+						{isEditingBuiltIn ? null : (
+							<input
+								value={modelInput}
+								onChange={(event) => setModelInput(event.target.value)}
+								onKeyDown={handleModelKeyDown}
+								onBlur={() => {
+									if (normalizedPendingModel) {
+										addModel(normalizedPendingModel);
+										setModelInput("");
+									}
+								}}
+								placeholder={form.models.length === 0 ? "Type a model ID and press Enter" : ""}
+								className="min-w-40 flex-1 bg-transparent text-[13px] text-text-primary placeholder:text-text-tertiary focus:outline-none"
+							/>
+						)}
 					</div>
-					<p className="mt-1 text-[12px] text-text-tertiary">Add at least one model or set a model source URL.</p>
+					<p className="mt-1 text-[12px] text-text-tertiary">
+						{isEditingBuiltIn
+							? "Built-in providers manage their model list automatically."
+							: "Add at least one model or set a model source URL."}
+					</p>
 				</section>
 
 				{draftModels.length > 1 ? (
@@ -450,6 +515,7 @@ export function ClineAddProviderDialog({
 									size="sm"
 									icon={selected ? <Check size={12} /> : undefined}
 									aria-pressed={selected}
+									disabled={isEditingBuiltIn}
 									className={cn("px-2.5", !selected && "text-text-secondary")}
 									onClick={() => toggleCapability(capability)}
 								>

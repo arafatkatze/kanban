@@ -22,6 +22,7 @@ import {
 	type UserInstructionConfigWatcher,
 } from "@clinebot/core";
 import type { MessageWithMetadata } from "@clinebot/shared";
+import { withAzureOpenAIFetch } from "./azure-openai-fetch";
 import { CLINE_BUILTIN_SLASH_COMMANDS } from "./cline-slash-commands";
 import { getCliTelemetryService } from "./cline-telemetry-service";
 
@@ -161,6 +162,12 @@ export async function createClineSdkSessionHost(): Promise<ClineSdkSessionHost> 
 	return await ClineCore.create({
 		backendMode: "auto",
 		telemetry: getCliTelemetryService(),
+		// The Cline SDK threads this `fetch` into every provider factory it
+		// instantiates for local sessions, which is what we need to intercept
+		// Azure OpenAI requests before they hit the network. `withAzureOpenAIFetch`
+		// only rewrites requests targeting `*.openai.azure.com`, so the generic
+		// OpenAI / OpenAI-compatible paths are left unchanged.
+		fetch: withAzureOpenAIFetch(),
 	});
 }
 
