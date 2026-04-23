@@ -281,7 +281,12 @@ describe("ClineAddProviderDialog", () => {
 		});
 
 		expect(onSubmit).toHaveBeenCalledTimes(1);
-		const payload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+		const submitCalls = onSubmit.mock.calls as unknown as Array<[Record<string, unknown>]>;
+		const firstCall = submitCalls[0];
+		if (!firstCall) {
+			throw new Error("Expected onSubmit to have been called.");
+		}
+		const payload = firstCall[0];
 		expect(payload).toEqual({
 			providerId: "ollama",
 			baseUrl: "http://localhost:11500",
