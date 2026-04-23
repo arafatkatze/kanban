@@ -328,6 +328,8 @@ export function parseClineProviderModelsRequest(value: unknown): RuntimeClinePro
 	}
 	return {
 		providerId,
+		baseUrl: parsed.baseUrl?.trim() || null,
+		apiKey: parsed.apiKey?.trim() || null,
 	};
 }
 

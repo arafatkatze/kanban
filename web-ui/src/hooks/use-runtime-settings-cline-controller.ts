@@ -545,12 +545,24 @@ export function useRuntimeSettingsClineController(
 					...(nextAws !== undefined ? { aws: nextAws } : {}),
 					...(nextGcp !== undefined ? { gcp: nextGcp } : {}),
 				});
-				setProviderId(savedSettings.providerId ?? savedSettings.oauthProvider ?? trimmedProviderId);
+				const nextProviderId = savedSettings.providerId ?? savedSettings.oauthProvider ?? trimmedProviderId;
+				setProviderId(nextProviderId);
 				setModelId(savedSettings.modelId ?? "");
 				setApiKey("");
 				setBaseUrl(savedSettings.baseUrl ?? "");
 				setReasoningEffort(savedSettings.reasoningEffort ?? "");
 				setProviderSettingsOverride(savedSettings);
+				setIsLoadingProviderModels(true);
+				try {
+					setProviderModels(
+						await fetchClineProviderModels(workspaceId, nextProviderId, {
+							baseUrl: savedSettings.baseUrl ?? trimmedBaseUrl,
+							...(trimmedApiKey !== undefined ? { apiKey: trimmedApiKey } : {}),
+						}),
+					);
+				} finally {
+					setIsLoadingProviderModels(false);
+				}
 				return { ok: true };
 			} catch (error) {
 				return {

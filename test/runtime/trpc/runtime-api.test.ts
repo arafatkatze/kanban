@@ -356,6 +356,7 @@ describe("createRuntimeApi startTaskSession", () => {
 	});
 
 	afterEach(() => {
+		vi.unstubAllGlobals();
 		restoreEnvVar("CLINE_API_KEY", originalClineApiKey);
 		restoreEnvVar("OCA_API_KEY", originalOcaApiKey);
 		if (originalClineMcpSettingsPath === undefined) {
@@ -1849,6 +1850,67 @@ describe("createRuntimeApi startTaskSession", () => {
 					id: "openrouter/free",
 					name: "OpenRouter Free",
 					supportsReasoningEffort: true,
+				},
+			],
+		});
+	});
+
+	it("loads LiteLLM provider models from the configured base URL before falling back to the static registry", async () => {
+		const fetchMock = vi.fn().mockResolvedValue({
+			ok: true,
+			json: async () => ({
+				data: [{ id: "openrouter/openai/gpt-4o-mini" }, { id: "openai/gpt-5" }],
+			}),
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		const api = createRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => ({}) as never),
+			getScopedClineTaskSessionService: vi.fn(async () => createClineTaskSessionServiceMock() as never),
+			resolveInteractiveShellCommand: vi.fn(),
+			runCommand: vi.fn(),
+		});
+		setSelectedProviderSettings({
+			provider: "litellm",
+			model: "gpt-5.4",
+			apiKey: "litellm-proxy-key",
+			baseUrl: "http://127.0.0.1:4000/v1",
+		});
+		localProviderMocks.getLocalProviderModels.mockResolvedValue({
+			providerId: "litellm",
+			models: [{ id: "gpt-5.4", name: "GPT-5.4" }],
+		});
+
+		const response = await api.getClineProviderModels(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ providerId: "litellm" },
+		);
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(fetchMock).toHaveBeenCalledWith(
+			"http://127.0.0.1:4000/v1/models",
+			expect.objectContaining({
+				method: "GET",
+				signal: expect.any(AbortSignal),
+			}),
+		);
+		const [, requestInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+		expect(requestInit.headers).toBeInstanceOf(Headers);
+		expect((requestInit.headers as Headers).get("Authorization")).toBe("Bearer litellm-proxy-key");
+		expect(localProviderMocks.getLocalProviderModels).not.toHaveBeenCalled();
+		expect(response).toEqual({
+			providerId: "litellm",
+			models: [
+				{
+					id: "openai/gpt-5",
+					name: "openai/gpt-5",
+				},
+				{
+					id: "openrouter/openai/gpt-4o-mini",
+					name: "openrouter/openai/gpt-4o-mini",
 				},
 			],
 		});

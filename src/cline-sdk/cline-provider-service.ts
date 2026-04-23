@@ -21,6 +21,7 @@ import type {
 	RuntimeClineReasoningEffort,
 } from "../core/api-contract";
 import { openInBrowser } from "../server/browser";
+import { fetchOpenAiCompatibleModelsFromBaseUrl } from "./provider-model-discovery";
 import {
 	addSdkCustomProvider,
 	completeClineDeviceAuth as completeSdkDeviceAuth,
@@ -94,6 +95,11 @@ export interface UpdateCustomClineProviderInput {
 	defaultModelId?: string | null;
 	modelsSourceUrl?: string | null;
 	capabilities?: SdkCustomProviderCapability[];
+}
+
+interface ProviderModelsRequestOverrides {
+	baseUrl?: string | null;
+	apiKey?: string | null;
 }
 
 function toErrorMessage(error: unknown): string {
@@ -784,8 +790,28 @@ export function createClineProviderService() {
 			};
 		},
 
-		async getProviderModels(providerId: string): Promise<RuntimeClineProviderModelsResponse> {
+		async getProviderModels(
+			providerId: string,
+			overrides: ProviderModelsRequestOverrides = {},
+		): Promise<RuntimeClineProviderModelsResponse> {
 			const normalizedProviderId = providerId.trim().toLowerCase();
+			const savedProviderSettings =
+				normalizedProviderId.length > 0 ? getSdkProviderSettings(normalizedProviderId) : null;
+			if (normalizedProviderId === "litellm") {
+				const baseUrl = overrides.baseUrl?.trim() || savedProviderSettings?.baseUrl?.trim() || "";
+				if (baseUrl.length > 0) {
+					const liveModels = await fetchOpenAiCompatibleModelsFromBaseUrl({
+						baseUrl,
+						apiKey: overrides.apiKey?.trim() || resolveVisibleApiKey(savedProviderSettings),
+					}).catch(() => []);
+					if (liveModels.length > 0) {
+						return {
+							providerId: normalizedProviderId,
+							models: liveModels,
+						};
+					}
+				}
+			}
 			const providerModels =
 				normalizedProviderId.length > 0
 					? await listSdkProviderModels(normalizedProviderId)
@@ -801,7 +827,7 @@ export function createClineProviderService() {
 				};
 			}
 
-			const configuredModel = getSdkProviderSettings(normalizedProviderId)?.model?.trim() ?? "";
+			const configuredModel = savedProviderSettings?.model?.trim() ?? "";
 			if (configuredModel.length > 0) {
 				return {
 					providerId: normalizedProviderId || providerId,

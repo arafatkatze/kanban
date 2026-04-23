@@ -683,6 +683,8 @@ export type RuntimeClineProviderCatalogResponse = z.infer<typeof runtimeClinePro
 
 export const runtimeClineProviderModelsRequestSchema = z.object({
 	providerId: z.string(),
+	baseUrl: z.string().nullable().optional(),
+	apiKey: z.string().nullable().optional(),
 });
 export type RuntimeClineProviderModelsRequest = z.infer<typeof runtimeClineProviderModelsRequestSchema>;
 

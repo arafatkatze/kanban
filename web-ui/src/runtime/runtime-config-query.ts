@@ -146,9 +146,17 @@ export async function fetchFeaturebaseToken(workspaceId: string | null): Promise
 export async function fetchClineProviderModels(
 	workspaceId: string | null,
 	providerId: string,
+	overrides?: {
+		baseUrl?: string | null;
+		apiKey?: string | null;
+	},
 ): Promise<RuntimeClineProviderModel[]> {
 	const trpcClient = getRuntimeTrpcClient(workspaceId);
-	const response = await trpcClient.runtime.getClineProviderModels.query({ providerId });
+	const response = await trpcClient.runtime.getClineProviderModels.query({
+		providerId,
+		...(overrides?.baseUrl !== undefined ? { baseUrl: overrides.baseUrl } : {}),
+		...(overrides?.apiKey !== undefined ? { apiKey: overrides.apiKey } : {}),
+	});
 	return response.models;
 }
 

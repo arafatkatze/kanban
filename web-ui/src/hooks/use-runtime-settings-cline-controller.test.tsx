@@ -748,6 +748,76 @@ describe("useRuntimeSettingsClineController", () => {
 		});
 	});
 
+	it("refreshes LiteLLM models after saving the configured proxy base URL", async () => {
+		const config = createRuntimeConfigResponse({
+			providerId: "litellm",
+			oauthProvider: null,
+			modelId: "gpt-5.4",
+			baseUrl: "http://localhost:4000/v1",
+			apiKeyConfigured: false,
+		});
+		let latestSnapshot: HookSnapshot | null = null;
+		fetchClineProviderModelsMock
+			.mockResolvedValueOnce([
+				{
+					id: "gpt-5.4",
+					name: "GPT-5.4",
+				},
+			])
+			.mockResolvedValueOnce([
+				{
+					id: "openrouter/openai/gpt-4o-mini",
+					name: "openrouter/openai/gpt-4o-mini",
+				},
+			]);
+		saveClineProviderSettingsMock.mockResolvedValue({
+			providerId: "litellm",
+			modelId: "openrouter/openai/gpt-4o-mini",
+			baseUrl: "http://127.0.0.1:4000/v1",
+			reasoningEffort: null,
+			apiKeyConfigured: true,
+			oauthProvider: null,
+			oauthAccessTokenConfigured: false,
+			oauthRefreshTokenConfigured: false,
+			oauthAccountId: null,
+			oauthExpiresAt: null,
+		});
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					open={true}
+					workspaceId="workspace-1"
+					selectedAgentId="cline"
+					config={config}
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+			await flushAsyncWork();
+		});
+
+		await act(async () => {
+			requireSnapshot(latestSnapshot).setBaseUrl("http://127.0.0.1:4000/v1");
+			requireSnapshot(latestSnapshot).setApiKey("litellm-proxy-key");
+			await flushAsyncWork();
+		});
+
+		await act(async () => {
+			expect(await requireSnapshot(latestSnapshot).saveProviderSettings()).toEqual({ ok: true });
+		});
+
+		expect(fetchClineProviderModelsMock).toHaveBeenLastCalledWith("workspace-1", "litellm", {
+			baseUrl: "http://127.0.0.1:4000/v1",
+			apiKey: "litellm-proxy-key",
+		});
+		expect(requireSnapshot(latestSnapshot).modelId).toBe("openrouter/openai/gpt-4o-mini");
+		expect(requireSnapshot(latestSnapshot).providerModelIds).toEqual(["openrouter/openai/gpt-4o-mini"]);
+		expect(requireSnapshot(latestSnapshot).apiKey).toBe("");
+		expect(requireSnapshot(latestSnapshot).apiKeyConfigured).toBe(true);
+	});
+
 	it("adds a custom provider and refreshes catalog and models", async () => {
 		const config = createRuntimeConfigResponse({
 			providerId: "cline",
