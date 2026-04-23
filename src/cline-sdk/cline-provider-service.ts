@@ -33,6 +33,7 @@ import {
 	fetchSdkOrgData,
 	getLastUsedSdkProviderSettings,
 	getSdkProviderSettings,
+	listSdkCustomProviderIds,
 	listSdkProviderCatalog,
 	listSdkProviderModels,
 	loginManagedOauthProvider,
@@ -55,6 +56,61 @@ const MANAGED_PROVIDER_ENV_KEYS: Record<ManagedClineOauthProviderId, readonly st
 	oca: ["OCA_API_KEY"],
 	"openai-codex": [],
 };
+
+// --- Ollama launch-config hardening (issue #164) ---------------------------
+// The @clinebot/llms@0.0.36 OpenAI-compatible provider factory only whitelists
+// `lmstudio` to skip the missing-API-key check; `ollama` is left out even
+// though Ollama's OpenAI-compat shim explicitly ignores Authorization headers
+// when no auth is configured. That surfaces as
+//   `Missing API key for provider "ollama". Set apiKey explicitly or one of:
+//   OLLAMA_API_KEY.`
+// at task start, which is the primary symptom reported in
+// https://github.com/cline/kanban/issues/164.
+//
+// Ollama's OpenAI-compat routes live under `/v1/*`. A user who types
+// `http://localhost:11434` (no `/v1`) — Ollama's documented default base URL —
+// causes the SDK to call `/chat/completions` and Ollama's router returns a
+// literal `404 page not found`, which is the "404 404 page not found" error
+// the same issue reports.
+//
+// Fix both at the launch-config choke point: only the built-in `ollama`
+// provider is affected; user-created custom providers keep whatever baseUrl
+// they entered.
+const OLLAMA_PROVIDER_ID = "ollama";
+const OLLAMA_DEFAULT_BASE_URL = "http://localhost:11434";
+const OLLAMA_COMPAT_PATH = "/v1";
+// Ollama ignores Authorization headers when the server isn't configured for
+// auth, so any non-empty string works. The literal "ollama" matches the
+// workaround users documented on the issue thread.
+export const OLLAMA_PLACEHOLDER_API_KEY = "ollama";
+
+/**
+ * Canonicalize the base URL Kanban passes to the SDK for the built-in
+ * Ollama provider. Guarantees the URL ends in `/v1` so the OpenAI-compat
+ * shim's `/v1/chat/completions` endpoint is hit and never Ollama's native
+ * `/api/*` router (which returns `404 page not found` for
+ * `/chat/completions`).
+ *
+ * - Empty / null / whitespace → `http://localhost:11434/v1`
+ * - `http://host[:port]`     → `http://host[:port]/v1`
+ * - `http://host[:port]/`    → `http://host[:port]/v1`
+ * - `http://host[:port]/v1`  → unchanged
+ * - `http://host[:port]/v1/` → `http://host[:port]/v1`
+ * - `http://host[:port]/api` → `http://host[:port]/v1`  (user pointed at native API by mistake)
+ * - `http://host[:port]/api/chat` → `http://host[:port]/v1`
+ */
+export function normalizeOllamaBaseUrl(baseUrl: string | null | undefined): string {
+	const raw = baseUrl?.trim() || OLLAMA_DEFAULT_BASE_URL;
+	const trimmed = raw.replace(/\/+$/, "");
+	if (/\/v1$/i.test(trimmed)) {
+		return trimmed;
+	}
+	const nativeApiMatch = trimmed.match(/^(.*?)\/api(?:\/.*)?$/i);
+	if (nativeApiMatch) {
+		return `${nativeApiMatch[1]}${OLLAMA_COMPAT_PATH}`;
+	}
+	return `${trimmed}${OLLAMA_COMPAT_PATH}`;
+}
 const CLINE_REMOTE_CONFIG_SCHEMA = z.object({
 	kanbanEnabled: z.boolean().optional(),
 });
@@ -371,6 +427,75 @@ async function refreshManagedOauthSettings(
 		settings: nextSettings,
 		apiKey: toProviderApiKey(providerId, nextCredentials.access),
 	};
+}
+
+// Apply the editable subset of ProviderSettings for a built-in provider
+// (apiKey, baseUrl, headers, timeout, defaultModelId -> settings.model).
+// The SDK-owned fields on the catalog entry (name, models list,
+// modelsSourceUrl, capabilities) are intentionally ignored here because they
+// are managed by @clinebot/llms and cannot be mutated from Kanban without
+// turning the built-in into a local-registry custom provider.
+function updateBuiltInProviderSettings(
+	providerId: string,
+	input: UpdateCustomClineProviderInput,
+): RuntimeClineProviderSettings {
+	const existingSettings = getSdkProviderSettings(providerId) ?? { provider: providerId };
+	const nextSettings: SdkProviderSettings = {
+		...existingSettings,
+		provider: providerId,
+	};
+
+	if (input.baseUrl !== undefined) {
+		const baseUrl = input.baseUrl.trim();
+		if (baseUrl) {
+			nextSettings.baseUrl = baseUrl;
+		} else {
+			delete nextSettings.baseUrl;
+		}
+	}
+
+	if (input.apiKey !== undefined) {
+		const apiKey = input.apiKey?.trim() ?? "";
+		if (apiKey) {
+			nextSettings.apiKey = apiKey;
+		} else {
+			delete nextSettings.apiKey;
+		}
+	}
+
+	if (input.headers !== undefined) {
+		if (input.headers && Object.keys(input.headers).length > 0) {
+			nextSettings.headers = input.headers;
+		} else {
+			delete nextSettings.headers;
+		}
+	}
+
+	if (input.timeoutMs !== undefined) {
+		if (typeof input.timeoutMs === "number" && input.timeoutMs > 0) {
+			nextSettings.timeout = input.timeoutMs;
+		} else {
+			delete nextSettings.timeout;
+		}
+	}
+
+	if (input.defaultModelId !== undefined) {
+		const modelId = input.defaultModelId?.trim() ?? "";
+		if (modelId) {
+			nextSettings.model = modelId;
+		} else {
+			delete nextSettings.model;
+		}
+	}
+
+	const isLastUsed = getLastUsedSdkProviderSettings()?.provider?.trim().toLowerCase() === providerId;
+	saveSdkProviderSettings({
+		settings: nextSettings,
+		tokenSource: hasOauthAccessToken(nextSettings) ? "oauth" : "manual",
+		setLastUsed: isLastUsed,
+	});
+
+	return toProviderSettingsSummary(getSdkProviderSettings(providerId));
 }
 
 export function createClineProviderService() {
@@ -715,7 +840,7 @@ export function createClineProviderService() {
 			}
 			const oauthResolution = await refreshManagedOauthSettings(selectedSettings);
 			const resolvedSettings = oauthResolution?.settings ?? selectedSettings;
-			const apiKey = isManagedOauthProviderId(normalizedProviderId)
+			const rawApiKey = isManagedOauthProviderId(normalizedProviderId)
 				? resolveManagedProviderLaunchApiKey({
 						providerId: normalizedProviderId,
 						settings: resolvedSettings,
@@ -726,20 +851,42 @@ export function createClineProviderService() {
 				overrides?.modelIdOverride?.trim() ||
 				resolvedSettings.model?.trim() ||
 				(await resolveDefaultModelIdForProvider(normalizedProviderId));
+			const reasoningEffort =
+				overrides && "reasoningEffortOverride" in overrides
+					? (overrides.reasoningEffortOverride ?? null)
+					: (toRuntimeReasoningEffort(resolvedSettings.reasoning?.effort) ?? undefined);
+
+			if (normalizedProviderId === OLLAMA_PROVIDER_ID) {
+				// Issue #164: supply a placeholder API key when the user hasn't set
+				// one (Ollama ignores the Authorization header by default) and
+				// auto-append `/v1` so the SDK hits the OpenAI-compat endpoint
+				// instead of Ollama's native `/api/*` router.
+				const trimmedApiKey = rawApiKey?.trim() ?? "";
+				const envApiKey = readEnvApiKey("OLLAMA_API_KEY") ?? "";
+				const apiKey = trimmedApiKey || envApiKey || OLLAMA_PLACEHOLDER_API_KEY;
+				return {
+					providerId: normalizedProviderId,
+					modelId,
+					apiKey,
+					baseUrl: normalizeOllamaBaseUrl(resolvedSettings.baseUrl),
+					reasoningEffort,
+				};
+			}
+
 			return {
 				providerId: normalizedProviderId,
 				modelId,
-				apiKey,
+				apiKey: rawApiKey,
 				baseUrl: resolvedSettings.baseUrl?.trim() || null,
-				reasoningEffort:
-					overrides && "reasoningEffortOverride" in overrides
-						? (overrides.reasoningEffortOverride ?? null)
-						: (toRuntimeReasoningEffort(resolvedSettings.reasoning?.effort) ?? undefined),
+				reasoningEffort,
 			};
 		},
 
 		async getProviderCatalog(): Promise<RuntimeClineProviderCatalogResponse> {
 			const selectedProviderId = getProviderSettingsSummary().providerId?.trim().toLowerCase() ?? "";
+			const customProviderIds = new Set(
+				(await listSdkCustomProviderIds().catch(() => [])).map((id) => id.trim().toLowerCase()),
+			);
 			const providers: RuntimeClineProviderCatalogItem[] = await listSdkProviderCatalog()
 				.then((sdkProviders) =>
 					sdkProviders
@@ -753,6 +900,7 @@ export function createClineProviderService() {
 							baseUrl: provider.baseUrl?.trim() || null,
 							supportsBaseUrl: (provider.baseUrl?.trim().length ?? 0) > 0,
 							env: provider.env,
+							isCustom: customProviderIds.has(provider.id.trim().toLowerCase()),
 						}))
 						.sort((left, right) => {
 							if (left.id === "cline") {
@@ -776,6 +924,7 @@ export function createClineProviderService() {
 					baseUrl: getProviderSettingsSummary().baseUrl,
 					supportsBaseUrl: (getProviderSettingsSummary().baseUrl?.trim().length ?? 0) > 0,
 					env: undefined,
+					isCustom: customProviderIds.has(selectedProviderId),
 				});
 			}
 
@@ -849,6 +998,21 @@ export function createClineProviderService() {
 			const providerId = input.providerId.trim().toLowerCase();
 			if (!providerId) {
 				throw new Error("Provider ID cannot be empty.");
+			}
+
+			// Built-in providers (shipped by @clinebot/llms) do not live in the
+			// local models.json custom-provider registry. Calling the SDK's
+			// updateLocalProvider against them throws `provider "<id>" does not
+			// exist`, which is what was surfacing from the settings Edit dialog
+			// (issue #293). For built-ins we only persist the editable subset of
+			// ProviderSettings (apiKey, baseUrl, headers, timeout, defaultModel
+			// -> settings.model) and leave the SDK-owned catalog fields (name,
+			// models, modelsSourceUrl, capabilities) untouched.
+			const customProviderIds = await listSdkCustomProviderIds().catch(() => []);
+			const isCustomProvider = customProviderIds.map((id) => id.trim().toLowerCase()).includes(providerId);
+
+			if (!isCustomProvider) {
+				return updateBuiltInProviderSettings(providerId, input);
 			}
 
 			await updateSdkCustomProvider({

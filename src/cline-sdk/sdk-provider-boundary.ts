@@ -311,13 +311,79 @@ export async function listSdkProviderCatalog(): Promise<SdkProviderCatalogItem[]
 export async function listSdkProviderModels(providerId: string): Promise<SdkProviderModel[]> {
 	const config = providerManager.getProviderConfig(providerId);
 	const response = await getLocalProviderModels(providerId, config);
-	return response.models.map((model: Awaited<typeof response>["models"][number]) => ({
+	const sdkModels: SdkProviderModel[] = response.models.map((model: Awaited<typeof response>["models"][number]) => ({
 		id: model.id,
 		name: model.name,
 		supportsVision: model.supportsVision,
 		supportsAttachments: model.supportsAttachments,
 		supportsReasoningEffort: model.supportsReasoning,
 	}));
+
+	if (providerId.trim().toLowerCase() !== "ollama") {
+		return sdkModels;
+	}
+
+	// Issue #164: the SDK's static catalog for `ollama` only contains
+	// cloud-hosted entries, so a user running `ollama serve` locally sees an
+	// empty model list in Settings even though their instance has models
+	// pulled. Augment the SDK catalog with the user's real local models by
+	// hitting Ollama's native `/api/tags` endpoint. Failures (unreachable
+	// server, etc.) are swallowed — we still return the SDK catalog so the
+	// dialog doesn't error out.
+	try {
+		const localModels = await fetchOllamaInstalledModels(config?.baseUrl);
+		if (localModels.length === 0) {
+			return sdkModels;
+		}
+		const seen = new Set(sdkModels.map((model) => model.id));
+		for (const localModel of localModels) {
+			if (!seen.has(localModel.id)) {
+				sdkModels.push(localModel);
+				seen.add(localModel.id);
+			}
+		}
+	} catch {
+		// Fall through with just the SDK catalog.
+	}
+	return sdkModels;
+}
+
+/**
+ * Derive the native `/api/tags` URL from whatever Ollama baseUrl the user
+ * configured (or the Ollama default), then fetch the user's locally-pulled
+ * models. Exported for tests.
+ *
+ * Strips any trailing `/v1`, `/v1/...`, or `/api[/...]` path so we get back
+ * to the Ollama root origin before appending `/api/tags`.
+ */
+export async function fetchOllamaInstalledModels(
+	baseUrl?: string | null,
+	fetchImpl: typeof fetch = fetch,
+): Promise<SdkProviderModel[]> {
+	const raw = baseUrl?.trim() || "http://localhost:11434";
+	const root = raw
+		.replace(/\/+$/, "")
+		.replace(/\/v1(?:\/.*)?$/i, "")
+		.replace(/\/api(?:\/.*)?$/i, "")
+		.replace(/\/+$/, "");
+	const url = `${root || "http://localhost:11434"}/api/tags`;
+	const response = await fetchImpl(url, {
+		method: "GET",
+		signal: AbortSignal.timeout(2_000),
+	});
+	if (!response.ok) {
+		throw new Error(`Ollama /api/tags returned HTTP ${response.status}`);
+	}
+	const data = (await response.json()) as {
+		models?: Array<{ name?: string; model?: string }>;
+	};
+	const entries = Array.isArray(data?.models) ? data.models : [];
+	return entries
+		.map((entry) => {
+			const id = (entry?.model ?? entry?.name ?? "").trim();
+			return id ? { id, name: id } : null;
+		})
+		.filter((model): model is SdkProviderModel => model !== null);
 }
 
 const providerManager = new ProviderSettingsManager();
@@ -341,6 +407,16 @@ async function readModelsRegistry(): Promise<LocalModelsFile> {
 
 async function writeModelsRegistry(state: LocalModelsFile): Promise<void> {
 	await writeFile(resolveModelsPath(), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
+
+// Returns the providerIds that the user has added via the custom provider
+// flow (stored in the local models.json next to provider-settings.json).
+// Built-in providers from @clinebot/llms are not included. Used to tell
+// apart SDK-owned built-ins from user-added custom providers when updating
+// settings (see cline-provider-service.updateCustomProvider).
+export async function listSdkCustomProviderIds(): Promise<string[]> {
+	const state = await readModelsRegistry();
+	return Object.keys(state.providers);
 }
 
 export async function addSdkCustomProvider(input: AddSdkCustomProviderInput): Promise<void> {
