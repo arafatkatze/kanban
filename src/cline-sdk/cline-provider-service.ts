@@ -56,6 +56,61 @@ const MANAGED_PROVIDER_ENV_KEYS: Record<ManagedClineOauthProviderId, readonly st
 	oca: ["OCA_API_KEY"],
 	"openai-codex": [],
 };
+
+// --- Ollama launch-config hardening (issue #164) ---------------------------
+// The @clinebot/llms@0.0.36 OpenAI-compatible provider factory only whitelists
+// `lmstudio` to skip the missing-API-key check; `ollama` is left out even
+// though Ollama's OpenAI-compat shim explicitly ignores Authorization headers
+// when no auth is configured. That surfaces as
+//   `Missing API key for provider "ollama". Set apiKey explicitly or one of:
+//   OLLAMA_API_KEY.`
+// at task start, which is the primary symptom reported in
+// https://github.com/cline/kanban/issues/164.
+//
+// Ollama's OpenAI-compat routes live under `/v1/*`. A user who types
+// `http://localhost:11434` (no `/v1`) — Ollama's documented default base URL —
+// causes the SDK to call `/chat/completions` and Ollama's router returns a
+// literal `404 page not found`, which is the "404 404 page not found" error
+// the same issue reports.
+//
+// Fix both at the launch-config choke point: only the built-in `ollama`
+// provider is affected; user-created custom providers keep whatever baseUrl
+// they entered.
+const OLLAMA_PROVIDER_ID = "ollama";
+const OLLAMA_DEFAULT_BASE_URL = "http://localhost:11434";
+const OLLAMA_COMPAT_PATH = "/v1";
+// Ollama ignores Authorization headers when the server isn't configured for
+// auth, so any non-empty string works. The literal "ollama" matches the
+// workaround users documented on the issue thread.
+export const OLLAMA_PLACEHOLDER_API_KEY = "ollama";
+
+/**
+ * Canonicalize the base URL Kanban passes to the SDK for the built-in
+ * Ollama provider. Guarantees the URL ends in `/v1` so the OpenAI-compat
+ * shim's `/v1/chat/completions` endpoint is hit and never Ollama's native
+ * `/api/*` router (which returns `404 page not found` for
+ * `/chat/completions`).
+ *
+ * - Empty / null / whitespace → `http://localhost:11434/v1`
+ * - `http://host[:port]`     → `http://host[:port]/v1`
+ * - `http://host[:port]/`    → `http://host[:port]/v1`
+ * - `http://host[:port]/v1`  → unchanged
+ * - `http://host[:port]/v1/` → `http://host[:port]/v1`
+ * - `http://host[:port]/api` → `http://host[:port]/v1`  (user pointed at native API by mistake)
+ * - `http://host[:port]/api/chat` → `http://host[:port]/v1`
+ */
+export function normalizeOllamaBaseUrl(baseUrl: string | null | undefined): string {
+	const raw = baseUrl?.trim() || OLLAMA_DEFAULT_BASE_URL;
+	const trimmed = raw.replace(/\/+$/, "");
+	if (/\/v1$/i.test(trimmed)) {
+		return trimmed;
+	}
+	const nativeApiMatch = trimmed.match(/^(.*?)\/api(?:\/.*)?$/i);
+	if (nativeApiMatch) {
+		return `${nativeApiMatch[1]}${OLLAMA_COMPAT_PATH}`;
+	}
+	return `${trimmed}${OLLAMA_COMPAT_PATH}`;
+}
 const CLINE_REMOTE_CONFIG_SCHEMA = z.object({
 	kanbanEnabled: z.boolean().optional(),
 });
@@ -785,7 +840,7 @@ export function createClineProviderService() {
 			}
 			const oauthResolution = await refreshManagedOauthSettings(selectedSettings);
 			const resolvedSettings = oauthResolution?.settings ?? selectedSettings;
-			const apiKey = isManagedOauthProviderId(normalizedProviderId)
+			const rawApiKey = isManagedOauthProviderId(normalizedProviderId)
 				? resolveManagedProviderLaunchApiKey({
 						providerId: normalizedProviderId,
 						settings: resolvedSettings,
@@ -796,15 +851,34 @@ export function createClineProviderService() {
 				overrides?.modelIdOverride?.trim() ||
 				resolvedSettings.model?.trim() ||
 				(await resolveDefaultModelIdForProvider(normalizedProviderId));
+			const reasoningEffort =
+				overrides && "reasoningEffortOverride" in overrides
+					? (overrides.reasoningEffortOverride ?? null)
+					: (toRuntimeReasoningEffort(resolvedSettings.reasoning?.effort) ?? undefined);
+
+			if (normalizedProviderId === OLLAMA_PROVIDER_ID) {
+				// Issue #164: supply a placeholder API key when the user hasn't set
+				// one (Ollama ignores the Authorization header by default) and
+				// auto-append `/v1` so the SDK hits the OpenAI-compat endpoint
+				// instead of Ollama's native `/api/*` router.
+				const trimmedApiKey = rawApiKey?.trim() ?? "";
+				const envApiKey = readEnvApiKey("OLLAMA_API_KEY") ?? "";
+				const apiKey = trimmedApiKey || envApiKey || OLLAMA_PLACEHOLDER_API_KEY;
+				return {
+					providerId: normalizedProviderId,
+					modelId,
+					apiKey,
+					baseUrl: normalizeOllamaBaseUrl(resolvedSettings.baseUrl),
+					reasoningEffort,
+				};
+			}
+
 			return {
 				providerId: normalizedProviderId,
 				modelId,
-				apiKey,
+				apiKey: rawApiKey,
 				baseUrl: resolvedSettings.baseUrl?.trim() || null,
-				reasoningEffort:
-					overrides && "reasoningEffortOverride" in overrides
-						? (overrides.reasoningEffortOverride ?? null)
-						: (toRuntimeReasoningEffort(resolvedSettings.reasoning?.effort) ?? undefined),
+				reasoningEffort,
 			};
 		},
 
