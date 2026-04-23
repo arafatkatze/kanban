@@ -157,6 +157,86 @@ describe("InMemoryClineSessionRuntime", () => {
 		);
 	});
 
+	it("supplies a placeholder api key to the SDK for local openai-compatible servers without auth", async () => {
+		// Regression for cline/kanban#301: without this substitution the SDK's
+		// openai-compatible client rejects local MLX/Ollama/llama.cpp sessions
+		// with `Missing API key for provider "<id>"`, even though those servers
+		// accept any Authorization header.
+		const fakeHost = {
+			start: vi.fn(async (input: { config?: { sessionId?: string; apiKey?: string; baseUrl?: string } }) => ({
+				sessionId: input.config?.sessionId ?? "session-1",
+				result: {},
+			})),
+			send: vi.fn(async () => ({})),
+			stop: vi.fn(async () => {}),
+			abort: vi.fn(async () => {}),
+			delete: vi.fn(async () => true),
+			dispose: vi.fn(async () => {}),
+			get: vi.fn(async () => undefined),
+			list: vi.fn(async () => []),
+			readMessages: vi.fn(async () => []),
+			subscribe: vi.fn(() => () => {}),
+		};
+
+		const runtime = createInMemoryClineSessionRuntime({
+			createSessionHost: async () => fakeHost,
+			createMcpRuntimeService: createNoopMcpRuntimeService,
+		});
+
+		await runtime.startTaskSession({
+			taskId: "task-local-mlx",
+			cwd: "/tmp/worktree",
+			prompt: "Say hi",
+			providerId: "mlx-local",
+			modelId: "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
+			apiKey: null,
+			baseUrl: "http://localhost:11435/v1",
+			systemPrompt: "You are a concise assistant.",
+		});
+
+		const startArg = fakeHost.start.mock.calls[0]?.[0] as { config?: { apiKey?: string; baseUrl?: string } };
+		expect(startArg?.config?.apiKey, "should not forward empty apiKey to openai-compatible SDK").toBeTypeOf("string");
+		expect(startArg?.config?.apiKey?.length ?? 0).toBeGreaterThan(0);
+		expect(startArg?.config?.baseUrl).toBe("http://localhost:11435/v1");
+	});
+
+	it("leaves apiKey undefined for remote providers when the user leaves the key blank", async () => {
+		const fakeHost = {
+			start: vi.fn(async (input: { config?: { sessionId?: string; apiKey?: string } }) => ({
+				sessionId: input.config?.sessionId ?? "session-1",
+				result: {},
+			})),
+			send: vi.fn(async () => ({})),
+			stop: vi.fn(async () => {}),
+			abort: vi.fn(async () => {}),
+			delete: vi.fn(async () => true),
+			dispose: vi.fn(async () => {}),
+			get: vi.fn(async () => undefined),
+			list: vi.fn(async () => []),
+			readMessages: vi.fn(async () => []),
+			subscribe: vi.fn(() => () => {}),
+		};
+
+		const runtime = createInMemoryClineSessionRuntime({
+			createSessionHost: async () => fakeHost,
+			createMcpRuntimeService: createNoopMcpRuntimeService,
+		});
+
+		await runtime.startTaskSession({
+			taskId: "task-remote",
+			cwd: "/tmp/worktree",
+			prompt: "Say hi",
+			providerId: "openrouter",
+			modelId: "openai/gpt-5",
+			apiKey: "",
+			baseUrl: "https://openrouter.ai/api/v1",
+			systemPrompt: "You are a concise assistant.",
+		});
+
+		const startArg = fakeHost.start.mock.calls[0]?.[0] as { config?: { apiKey?: string } };
+		expect(startArg?.config?.apiKey).toBeUndefined();
+	});
+
 	it("persists provided task title to session metadata when supported", async () => {
 		const update = vi.fn(async () => ({ updated: true }));
 		const fakeHost = {

@@ -3,6 +3,7 @@
 // stopping native Cline sessions without exposing SDK details upstream.
 import type { RuntimeClineReasoningEffort, RuntimeTaskImage, RuntimeTaskSessionMode } from "../core/api-contract";
 import { extractClineSessionId } from "./cline-event-adapter";
+import { resolveClineLaunchApiKey } from "./cline-launch-auth";
 import {
 	type ClineMcpRuntimeService,
 	type ClineMcpToolBundle,
@@ -202,7 +203,7 @@ export class InMemoryClineSessionRuntime implements ClineSessionRuntime {
 					sessionId: requestedSessionId,
 					providerId: request.providerId,
 					modelId: request.modelId,
-					apiKey: request.apiKey?.trim() || undefined,
+					apiKey: resolveClineLaunchApiKey({ apiKey: request.apiKey, baseUrl: request.baseUrl }),
 					baseUrl: request.baseUrl?.trim() || undefined,
 					reasoningEffort:
 						request.reasoningEffort === null
