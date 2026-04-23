@@ -136,7 +136,7 @@ export function ClineSetupSection({
 			) ?? null,
 		[controller.normalizedProviderId, controller.providerCatalog],
 	);
-	const apiKeyPlaceholder = controller.apiKeyConfigured ? "Saved" : "Enter API key";
+	const apiKeyPlaceholder = controller.apiKeyConfigured ? "••••••••••••••••" : "Enter API key";
 	const providerEnvHint = (selectedProvider?.env ?? [])
 		.map((value) => value.trim())
 		.filter((value) => value.length > 0)
