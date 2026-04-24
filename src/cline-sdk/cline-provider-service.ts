@@ -747,6 +747,7 @@ export function createClineProviderService() {
 							id: provider.id,
 							name: provider.name,
 							oauthSupported: (provider.capabilities ?? []).includes("oauth"),
+							custom: provider.custom,
 							enabled:
 								selectedProviderId.length > 0 ? selectedProviderId === provider.id : provider.id === "cline",
 							defaultModelId: provider.defaultModelId ?? null,

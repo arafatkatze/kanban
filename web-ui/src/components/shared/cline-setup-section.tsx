@@ -150,7 +150,10 @@ export function ClineSetupSection({
 		() => clineProviderOptions.find((option) => option.value === controller.providerId) ?? null,
 		[clineProviderOptions, controller.providerId],
 	);
-	const canEditSelectedProvider = controller.providerId.trim().length > 0 && !controller.isOauthProviderSelected;
+	const canEditSelectedProvider =
+		controller.providerId.trim().length > 0 &&
+		!controller.isOauthProviderSelected &&
+		selectedProvider?.custom === true;
 	const selectedProviderEditInitialValues = useMemo((): ClineProviderDialogInitialValues | null => {
 		if (!canEditSelectedProvider) {
 			return null;

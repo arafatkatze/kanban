@@ -62,6 +62,7 @@ export interface SdkProviderCatalogItem {
 	baseUrl?: string;
 	env?: string[];
 	capabilities?: string[];
+	custom?: boolean;
 }
 
 export interface SdkProviderModel {
@@ -305,7 +306,11 @@ export async function completeClineDeviceAuth(input: {
 }
 
 export async function listSdkProviderCatalog(): Promise<SdkProviderCatalogItem[]> {
-	return await ClineCore.Llms.getAllProviders();
+	const customProviderIds = await readCustomProviderIds();
+	return (await ClineCore.Llms.getAllProviders()).map((provider: SdkProviderCatalogItem) => ({
+		...provider,
+		custom: customProviderIds.has(provider.id.trim().toLowerCase()),
+	}));
 }
 
 export async function listSdkProviderModels(providerId: string): Promise<SdkProviderModel[]> {
@@ -337,6 +342,11 @@ async function readModelsRegistry(): Promise<LocalModelsFile> {
 		// Fall through.
 	}
 	return { version: 1, providers: {} };
+}
+
+async function readCustomProviderIds(): Promise<Set<string>> {
+	const state = await readModelsRegistry();
+	return new Set(Object.keys(state.providers).map((providerId) => providerId.trim().toLowerCase()));
 }
 
 async function writeModelsRegistry(state: LocalModelsFile): Promise<void> {
