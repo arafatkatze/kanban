@@ -2,7 +2,7 @@
 // The rest of Kanban should talk to the SDK through local service modules so
 // auth, catalog, and provider-settings behavior stay behind one boundary.
 
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import * as ClineCore from "@clinebot/core";
 import {
@@ -62,6 +62,9 @@ export interface SdkProviderCatalogItem {
 	baseUrl?: string;
 	env?: string[];
 	capabilities?: string[];
+	client?: string;
+	modelsSourceUrl?: string;
+	custom?: boolean;
 }
 
 export interface SdkProviderModel {
@@ -125,10 +128,42 @@ type LocalModelsFile = {
 				capabilities?: SdkCustomProviderCapability[];
 				modelsSourceUrl?: string;
 			};
-			models: Record<string, { id: string; name: string }>;
+			models: Record<
+				string,
+				{
+					id: string;
+					name: string;
+					supportsVision?: boolean;
+					supportsAttachments?: boolean;
+					supportsReasoning?: boolean;
+				}
+			>;
 		}
 	>;
 };
+
+type UpdateLocalProviderRequest = {
+	providerId: string;
+	name?: string;
+	baseUrl?: string;
+	apiKey?: string | null;
+	headers?: Record<string, string> | null;
+	timeoutMs?: number | null;
+	models?: string[];
+	defaultModelId?: string | null;
+	modelsSourceUrl?: string | null;
+	capabilities?: SdkCustomProviderCapability[];
+};
+
+const MANAGED_OAUTH_PROVIDER_IDS = new Set<string>(["cline", "oca", "openai-codex"]);
+const OPENAI_COMPATIBLE_CLIENT = "openai-compatible";
+const CUSTOM_PROVIDER_CAPABILITIES = new Set<SdkCustomProviderCapability>([
+	"streaming",
+	"tools",
+	"reasoning",
+	"vision",
+	"prompt-cache",
+]);
 
 export type SdkMcpTool = Tool;
 
@@ -305,7 +340,12 @@ export async function completeClineDeviceAuth(input: {
 }
 
 export async function listSdkProviderCatalog(): Promise<SdkProviderCatalogItem[]> {
-	return await ClineCore.Llms.getAllProviders();
+	const localModels = await readModelsRegistry();
+	return (await ClineCore.Llms.getAllProviders()).map((provider: SdkProviderCatalogItem) => ({
+		...provider,
+		custom: Boolean(localModels.providers[provider.id.trim().toLowerCase()]),
+		modelsSourceUrl: localModels.providers[provider.id.trim().toLowerCase()]?.provider.modelsSourceUrl,
+	}));
 }
 
 export async function listSdkProviderModels(providerId: string): Promise<SdkProviderModel[]> {
@@ -340,7 +380,131 @@ async function readModelsRegistry(): Promise<LocalModelsFile> {
 }
 
 async function writeModelsRegistry(state: LocalModelsFile): Promise<void> {
-	await writeFile(resolveModelsPath(), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+	const modelsPath = resolveModelsPath();
+	await mkdir(dirname(modelsPath), { recursive: true });
+	await writeFile(modelsPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
+
+function normalizeProviderId(providerId: string): string {
+	return providerId.trim().toLowerCase();
+}
+
+function uniqueTrimmed(values: readonly string[] | undefined): string[] {
+	return [...new Set((values ?? []).map((value) => value.trim()).filter((value) => value.length > 0))];
+}
+
+function toCustomProviderCapabilities(
+	values: readonly string[] | null | undefined,
+): SdkCustomProviderCapability[] | undefined {
+	const capabilities = values?.filter((value): value is SdkCustomProviderCapability =>
+		CUSTOM_PROVIDER_CAPABILITIES.has(value as SdkCustomProviderCapability),
+	);
+	return capabilities && capabilities.length > 0 ? [...new Set(capabilities)] : undefined;
+}
+
+function isMissingLocalProviderError(error: unknown, providerId: string): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	return message === `provider "${providerId}" does not exist`;
+}
+
+function titleCaseProviderId(providerId: string): string {
+	return providerId
+		.split(/[-_]/)
+		.filter(Boolean)
+		.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+		.join(" ");
+}
+
+async function getOverrideableBuiltInProvider(providerId: string): Promise<SdkProviderCatalogItem | null> {
+	if (MANAGED_OAUTH_PROVIDER_IDS.has(providerId)) {
+		return null;
+	}
+	const provider = (await ClineCore.Llms.getProvider(providerId)) as SdkProviderCatalogItem | undefined;
+	if (!provider || provider.client !== OPENAI_COMPATIBLE_CLIENT) {
+		return null;
+	}
+	if ((provider.capabilities ?? []).includes("oauth")) {
+		return null;
+	}
+	return provider;
+}
+
+async function readRegisteredProviderModels(
+	providerId: string,
+): Promise<Record<string, { id?: string; name?: string }>> {
+	return (await ClineCore.Llms.getModelsForProvider(providerId)) as Record<string, { id?: string; name?: string }>;
+}
+
+async function resolveSeedModelIds(input: UpdateSdkCustomProviderInput, providerId: string): Promise<string[]> {
+	const explicitModels = uniqueTrimmed(input.models);
+	if (explicitModels.length > 0) {
+		return explicitModels;
+	}
+
+	const registeredModels = await readRegisteredProviderModels(providerId).catch(
+		(): Record<string, { id?: string; name?: string }> => ({}),
+	);
+	const registeredModelIds = uniqueTrimmed(Object.keys(registeredModels));
+	if (registeredModelIds.length > 0) {
+		return registeredModelIds;
+	}
+
+	return [];
+}
+
+async function seedLocalProviderOverride(input: UpdateSdkCustomProviderInput): Promise<void> {
+	const providerId = normalizeProviderId(input.providerId);
+	const state = await readModelsRegistry();
+	if (state.providers[providerId]) {
+		return;
+	}
+
+	const provider = await getOverrideableBuiltInProvider(providerId);
+	if (!provider) {
+		throw new Error(`provider "${providerId}" does not exist`);
+	}
+
+	const resolvedModelIds = await resolveSeedModelIds(input, providerId);
+	const fallbackDefaultModelId = input.defaultModelId?.trim() || provider.defaultModelId?.trim() || "";
+	const modelIds =
+		resolvedModelIds.length > 0 ? resolvedModelIds : fallbackDefaultModelId ? [fallbackDefaultModelId] : [];
+	const defaultModelId =
+		(input.defaultModelId?.trim() && modelIds.includes(input.defaultModelId.trim())
+			? input.defaultModelId.trim()
+			: provider.defaultModelId?.trim() && modelIds.includes(provider.defaultModelId.trim())
+				? provider.defaultModelId.trim()
+				: modelIds[0]) ?? "";
+	if (!defaultModelId) {
+		throw new Error("at least one model is required");
+	}
+
+	const registeredModels = await readRegisteredProviderModels(providerId).catch(
+		(): Record<string, { id?: string; name?: string }> => ({}),
+	);
+	const baseUrl = input.baseUrl?.trim() || provider.baseUrl?.trim() || "";
+	if (!baseUrl) {
+		throw new Error("baseUrl is required");
+	}
+
+	state.providers[providerId] = {
+		provider: {
+			name: input.name?.trim() || provider.name || titleCaseProviderId(providerId),
+			baseUrl,
+			defaultModelId,
+			capabilities: input.capabilities ?? toCustomProviderCapabilities(provider.capabilities),
+			modelsSourceUrl: input.modelsSourceUrl?.trim() || undefined,
+		},
+		models: Object.fromEntries(
+			modelIds.map((modelId) => [
+				modelId,
+				{
+					id: modelId,
+					name: registeredModels[modelId]?.name?.trim() || modelId,
+				},
+			]),
+		),
+	};
+	await writeModelsRegistry(state);
 }
 
 export async function addSdkCustomProvider(input: AddSdkCustomProviderInput): Promise<void> {
@@ -364,27 +528,35 @@ export async function updateSdkCustomProvider(input: UpdateSdkCustomProviderInpu
 		ClineCore as {
 			updateLocalProvider?: (
 				manager: ProviderSettingsManager,
-				request: {
-					providerId: string;
-					name?: string;
-					baseUrl?: string;
-					apiKey?: string | null;
-					headers?: Record<string, string> | null;
-					timeoutMs?: number | null;
-					models?: string[];
-					defaultModelId?: string | null;
-					modelsSourceUrl?: string | null;
-					capabilities?: SdkCustomProviderCapability[];
-				},
+				request: UpdateLocalProviderRequest,
 			) => Promise<unknown>;
 		}
 	).updateLocalProvider;
 	if (updateLocalProvider) {
-		await updateLocalProvider(providerManager, input);
+		const providerId = normalizeProviderId(input.providerId);
+		try {
+			await updateLocalProvider(providerManager, input);
+			return;
+		} catch (error) {
+			if (!isMissingLocalProviderError(error, providerId) || !(await getOverrideableBuiltInProvider(providerId))) {
+				throw error;
+			}
+			const previousModelsState = await readModelsRegistry();
+			const previousSettingsState = providerManager.read();
+			await seedLocalProviderOverride(input);
+			try {
+				await updateLocalProvider(providerManager, input);
+			} catch (updateError) {
+				await writeModelsRegistry(previousModelsState);
+				providerManager.write(previousSettingsState);
+				ClineCore.Llms.unregisterProvider(providerId);
+				throw updateError;
+			}
+		}
 		return;
 	}
 
-	const providerId = input.providerId.trim().toLowerCase();
+	const providerId = normalizeProviderId(input.providerId);
 	const state = await readModelsRegistry();
 	const existing = state.providers[providerId];
 	if (!existing) {
@@ -396,9 +568,7 @@ export async function updateSdkCustomProvider(input: UpdateSdkCustomProviderInpu
 
 	const models =
 		input.models?.map((model) => model.trim()).filter((model) => model.length > 0) ??
-		Object.keys(existing.models)
-			.map((model) => model.trim())
-			.filter((model) => model.length > 0);
+		uniqueTrimmed(Object.keys(existing.models));
 	if (models.length === 0) {
 		throw new Error("at least one model is required");
 	}

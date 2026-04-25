@@ -673,6 +673,10 @@ export const runtimeClineProviderCatalogItemSchema = z.object({
 	baseUrl: z.string().nullable(),
 	supportsBaseUrl: z.boolean(),
 	env: z.array(z.string()).optional(),
+	custom: z.boolean().optional(),
+	client: z.string().optional(),
+	capabilities: z.array(z.string()).optional(),
+	modelsSourceUrl: z.string().nullable().optional(),
 });
 export type RuntimeClineProviderCatalogItem = z.infer<typeof runtimeClineProviderCatalogItemSchema>;
 
