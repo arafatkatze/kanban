@@ -677,6 +677,8 @@ export const runtimeClineProviderCatalogItemSchema = z.object({
 	client: z.string().optional(),
 	capabilities: z.array(z.string()).optional(),
 	modelsSourceUrl: z.string().nullable().optional(),
+	headers: z.record(z.string(), z.string()).optional(),
+	timeoutMs: z.number().int().positive().optional(),
 });
 export type RuntimeClineProviderCatalogItem = z.infer<typeof runtimeClineProviderCatalogItemSchema>;
 

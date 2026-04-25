@@ -191,6 +191,8 @@ export function ClineSetupSection({
 			modelsSourceUrl: selectedProvider?.modelsSourceUrl?.trim() || "",
 			models: normalizedModelIds,
 			defaultModelId: controller.modelId.trim() || selectedProvider?.defaultModelId?.trim() || "",
+			timeoutMs: selectedProvider?.timeoutMs ?? null,
+			headers: selectedProvider?.headers,
 			capabilities: normalizeProviderCapabilities(selectedProvider?.capabilities),
 		};
 	}, [

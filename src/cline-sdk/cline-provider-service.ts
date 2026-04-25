@@ -757,6 +757,8 @@ export function createClineProviderService() {
 							env: provider.env,
 							capabilities: provider.capabilities,
 							modelsSourceUrl: provider.modelsSourceUrl?.trim() || null,
+							headers: provider.headers,
+							timeoutMs: provider.timeoutMs,
 						}))
 						.sort((left, right) => {
 							if (left.id === "cline") {

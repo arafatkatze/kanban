@@ -190,4 +190,39 @@ describe("ClineSetupSection", () => {
 
 		expect(findButtonByText(document.body, "Edit")).toBeInstanceOf(HTMLButtonElement);
 	});
+
+	it("preloads saved advanced settings in the edit dialog", async () => {
+		await act(async () => {
+			root.render(
+				<ClineSetupSection
+					controller={createController(
+						createProvider({
+							custom: true,
+							headers: {
+								"X-Test-Header": "test-value",
+							},
+							timeoutMs: 45123,
+						}),
+					)}
+					controlsDisabled={false}
+					showMcpSettings={false}
+				/>,
+			);
+		});
+
+		const editButton = findButtonByText(document.body, "Edit");
+		expect(editButton).toBeInstanceOf(HTMLButtonElement);
+
+		await act(async () => {
+			editButton?.click();
+		});
+
+		expect(document.body.querySelector<HTMLInputElement>('input[placeholder="30000"]')?.value).toBe("45123");
+		expect(document.body.querySelector<HTMLInputElement>('input[placeholder="Header name"]')?.value).toBe(
+			"X-Test-Header",
+		);
+		expect(document.body.querySelector<HTMLInputElement>('input[placeholder="Header value"]')?.value).toBe(
+			"test-value",
+		);
+	});
 });
