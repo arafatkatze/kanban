@@ -345,11 +345,13 @@ export async function listSdkProviderCatalog(): Promise<SdkProviderCatalogItem[]
 	const localModels = await readModelsRegistry();
 	return (await ClineCore.Llms.getAllProviders()).map((provider: SdkProviderCatalogItem) => {
 		const providerId = provider.id.trim().toLowerCase();
+		const localProvider = localModels.providers[providerId]?.provider;
 		const providerSettings = providerManager.getProviderSettings(providerId);
 		return {
 			...provider,
-			custom: Boolean(localModels.providers[providerId]),
-			modelsSourceUrl: localModels.providers[providerId]?.provider.modelsSourceUrl,
+			custom: Boolean(localProvider),
+			capabilities: localProvider?.capabilities ?? provider.capabilities,
+			modelsSourceUrl: localProvider?.modelsSourceUrl,
 			headers: providerSettings?.headers,
 			timeoutMs: providerSettings?.timeout,
 		};

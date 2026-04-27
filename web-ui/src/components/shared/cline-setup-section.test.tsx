@@ -225,4 +225,33 @@ describe("ClineSetupSection", () => {
 			"test-value",
 		);
 	});
+
+	it("preloads saved capability overrides in the edit dialog", async () => {
+		await act(async () => {
+			root.render(
+				<ClineSetupSection
+					controller={createController(
+						createProvider({
+							custom: true,
+							capabilities: ["vision", "reasoning"],
+						}),
+					)}
+					controlsDisabled={false}
+					showMcpSettings={false}
+				/>,
+			);
+		});
+
+		const editButton = findButtonByText(document.body, "Edit");
+		expect(editButton).toBeInstanceOf(HTMLButtonElement);
+
+		await act(async () => {
+			editButton?.click();
+		});
+
+		expect(findButtonByText(document.body, "vision")?.getAttribute("aria-pressed")).toBe("true");
+		expect(findButtonByText(document.body, "reasoning")?.getAttribute("aria-pressed")).toBe("true");
+		expect(findButtonByText(document.body, "streaming")?.getAttribute("aria-pressed")).toBe("false");
+		expect(findButtonByText(document.body, "tools")?.getAttribute("aria-pressed")).toBe("false");
+	});
 });

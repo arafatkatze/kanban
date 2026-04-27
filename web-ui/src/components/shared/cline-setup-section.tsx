@@ -63,10 +63,13 @@ function formatExpiry(value: string): string {
 function normalizeProviderCapabilities(
 	values: readonly string[] | undefined,
 ): RuntimeClineProviderCapability[] | undefined {
+	if (values === undefined) {
+		return undefined;
+	}
 	const capabilities = values?.filter((value): value is RuntimeClineProviderCapability =>
 		EDITABLE_PROVIDER_CAPABILITIES.has(value as RuntimeClineProviderCapability),
 	);
-	return capabilities && capabilities.length > 0 ? capabilities : undefined;
+	return capabilities ?? [];
 }
 
 export function ClineSetupSection({
