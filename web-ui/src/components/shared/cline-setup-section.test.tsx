@@ -1,8 +1,9 @@
-import { act } from "react";
+import { act, type ComponentProps, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ClineSetupSection } from "@/components/shared/cline-setup-section";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import type { UseRuntimeSettingsClineControllerResult } from "@/hooks/use-runtime-settings-cline-controller";
 import type { RuntimeClineProviderCatalogItem } from "@/runtime/types";
 
@@ -13,6 +14,14 @@ vi.mock("@/runtime/runtime-config-query", () => ({
 function findButtonByText(container: ParentNode, text: string): HTMLButtonElement | null {
 	return (Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.trim() === text) ??
 		null) as HTMLButtonElement | null;
+}
+
+function ClineSetupSectionTestHarness(props: ComponentProps<typeof ClineSetupSection>): ReactElement {
+	return (
+		<TooltipProvider>
+			<ClineSetupSection {...props} />
+		</TooltipProvider>
+	);
 }
 
 function createProvider(overrides: Partial<RuntimeClineProviderCatalogItem> = {}): RuntimeClineProviderCatalogItem {
@@ -136,7 +145,7 @@ describe("ClineSetupSection", () => {
 	it("shows edit controls for OpenAI-compatible built-in providers", async () => {
 		await act(async () => {
 			root.render(
-				<ClineSetupSection
+				<ClineSetupSectionTestHarness
 					controller={createController(createProvider({ custom: false }))}
 					controlsDisabled={false}
 					showMcpSettings={false}
@@ -150,7 +159,7 @@ describe("ClineSetupSection", () => {
 	it("does not show edit controls for non-OpenAI-compatible built-in providers", async () => {
 		await act(async () => {
 			root.render(
-				<ClineSetupSection
+				<ClineSetupSectionTestHarness
 					controller={createController(
 						createProvider({ id: "anthropic", name: "Anthropic", client: "anthropic", custom: false }),
 					)}
@@ -166,7 +175,7 @@ describe("ClineSetupSection", () => {
 	it("does not show edit controls for managed OAuth providers", async () => {
 		await act(async () => {
 			root.render(
-				<ClineSetupSection
+				<ClineSetupSectionTestHarness
 					controller={createController(createProvider({ id: "cline", name: "Cline", custom: false }), {
 						normalizedProviderId: "cline",
 						managedOauthProvider: "cline",
@@ -184,7 +193,7 @@ describe("ClineSetupSection", () => {
 	it("shows custom-provider edit controls for local custom providers", async () => {
 		await act(async () => {
 			root.render(
-				<ClineSetupSection
+				<ClineSetupSectionTestHarness
 					controller={createController(createProvider({ id: "my-provider", name: "My Provider", custom: true }))}
 					controlsDisabled={false}
 					showMcpSettings={false}
@@ -198,7 +207,7 @@ describe("ClineSetupSection", () => {
 	it("preloads saved advanced settings in the edit dialog", async () => {
 		await act(async () => {
 			root.render(
-				<ClineSetupSection
+				<ClineSetupSectionTestHarness
 					controller={createController(
 						createProvider({
 							custom: true,
@@ -233,7 +242,7 @@ describe("ClineSetupSection", () => {
 	it("preloads saved capability overrides in the edit dialog", async () => {
 		await act(async () => {
 			root.render(
-				<ClineSetupSection
+				<ClineSetupSectionTestHarness
 					controller={createController(
 						createProvider({
 							custom: true,
