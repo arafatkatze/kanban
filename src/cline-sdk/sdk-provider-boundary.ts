@@ -350,8 +350,8 @@ export async function listSdkProviderCatalog(): Promise<SdkProviderCatalogItem[]
 		return {
 			...provider,
 			custom: Boolean(localProvider),
-			capabilities: localProvider?.capabilities ?? provider.capabilities,
-			modelsSourceUrl: localProvider?.modelsSourceUrl,
+			capabilities: localProvider ? localProvider.capabilities : provider.capabilities,
+			modelsSourceUrl: localProvider ? localProvider.modelsSourceUrl : provider.modelsSourceUrl,
 			headers: providerSettings?.headers,
 			timeoutMs: providerSettings?.timeout,
 		};
@@ -410,11 +410,6 @@ function toCustomProviderCapabilities(
 		CUSTOM_PROVIDER_CAPABILITIES.has(value as SdkCustomProviderCapability),
 	);
 	return capabilities && capabilities.length > 0 ? [...new Set(capabilities)] : undefined;
-}
-
-function isMissingLocalProviderError(error: unknown, providerId: string): boolean {
-	const message = error instanceof Error ? error.message : String(error);
-	return message === `provider "${providerId}" does not exist`;
 }
 
 function titleCaseProviderId(providerId: string): string {
@@ -544,26 +539,26 @@ export async function updateSdkCustomProvider(input: UpdateSdkCustomProviderInpu
 	).updateLocalProvider;
 	if (updateLocalProvider) {
 		const providerId = normalizeProviderId(input.providerId);
+		const previousModelsState = await readModelsRegistry();
+		const hasLocalProvider = Boolean(previousModelsState.providers[providerId]);
+		const shouldSeedLocalOverride = !hasLocalProvider && Boolean(await getOverrideableBuiltInProvider(providerId));
+		const previousSettingsState = shouldSeedLocalOverride ? providerManager.read() : null;
+		if (shouldSeedLocalOverride) {
+			await seedLocalProviderOverride(input);
+		}
 		try {
 			await updateLocalProvider(providerManager, input);
 			return;
 		} catch (error) {
-			if (!isMissingLocalProviderError(error, providerId) || !(await getOverrideableBuiltInProvider(providerId))) {
-				throw error;
-			}
-			const previousModelsState = await readModelsRegistry();
-			const previousSettingsState = providerManager.read();
-			await seedLocalProviderOverride(input);
-			try {
-				await updateLocalProvider(providerManager, input);
-			} catch (updateError) {
+			if (shouldSeedLocalOverride) {
 				await writeModelsRegistry(previousModelsState);
-				providerManager.write(previousSettingsState);
+				if (previousSettingsState) {
+					providerManager.write(previousSettingsState);
+				}
 				ClineCore.Llms.unregisterProvider(providerId);
-				throw updateError;
 			}
+			throw error;
 		}
-		return;
 	}
 
 	const providerId = normalizeProviderId(input.providerId);
