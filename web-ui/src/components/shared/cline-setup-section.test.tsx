@@ -35,6 +35,9 @@ function createController(
 	overrides: Partial<UseRuntimeSettingsClineControllerResult> = {},
 ): UseRuntimeSettingsClineControllerResult {
 	const providerId = provider.id;
+	const currentMainControllerMethods = {
+		refreshProviderModels: vi.fn(async () => ({ ok: true })),
+	};
 	return {
 		currentProviderSettings: {
 			providerId,
@@ -94,6 +97,7 @@ function createController(
 		selectedModelSupportsReasoningEffort: false,
 		hasUnsavedChanges: false,
 		saveProviderSettings: vi.fn(async () => ({ ok: true })),
+		...currentMainControllerMethods,
 		addCustomProvider: vi.fn(async () => ({ ok: true })),
 		updateCustomProvider: vi.fn(async () => ({ ok: true })),
 		runOauthLogin: vi.fn(async () => ({ ok: true })),
